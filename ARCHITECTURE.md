@@ -1,0 +1,239 @@
+# signal-frame — architecture
+
+*The wire kernel. Frame envelope, length-prefixed rkyv archives,
+handshake, exchange identifiers, async correlation, streams, and
+reply plumbing — shared by every Rust-to-Rust signaling channel in
+the workspace.*
+
+`signal-frame` is the base contract crate for the workspace's typed
+inter-component communication. It owns the protocol substrate that
+every domain contract uses: frame mechanics, protocol-version
+records, exchange identifiers, and the request/reply/event shape.
+
+`signal-frame` is the renamed successor to the former `signal-core`.
+The six Sema verbs (`Assert` / `Mutate` / `Retract` / `Match` /
+`Subscribe` / `Validate`) that used to live in this crate have moved
+to the sibling crate `signal-sema`. See
+`primary/reports/designer/238-signal-architecture-redirection-contract-local-verbs.md`
+and `primary/reports/designer/239-signal-architecture-migration-plan.md`
+in the primary workspace for the architectural redirection that
+produced this split.
+
+## 0 · TL;DR
+
+`signal-frame` is domain-free and verb-free. Per-component contract
+crates depend on it and supply their own contract-local operation
+roots in domain-verb form (`Query`, `Submit`, `Configure`,
+`Register`, `Observe`, etc.).
+
+```mermaid
+flowchart TB
+    frame["signal-frame<br/>(frame kernel)"]
+    sema["signal-sema<br/>(Sema verbs)"]
+    components["signal-&lt;component&gt;<br/>(per-component contracts)"]
+    owners["owner-signal-&lt;component&gt;<br/>(owner contracts)"]
+
+    frame --> sema
+    frame --> components
+    frame --> owners
+```
+
+Components depend on `signal-frame` for the wire kernel and on
+`signal-sema` when they need typed Sema operations internally (for
+executor lowering, logging, introspection).
+
+## 1 · Owns
+
+- Two frame types and their bodies — one per channel shape — plus
+  length-prefixed rkyv encoding helpers shared between them:
+  - `ExchangeFrame<RequestPayload, ReplyPayload>` /
+    `ExchangeFrameBody<RequestPayload, ReplyPayload>` — non-streaming
+    channels. Four variants: `HandshakeRequest`, `HandshakeReply`,
+    `Request { exchange, request }`, `Reply { exchange, reply }`.
+  - `StreamingFrame<RequestPayload, ReplyPayload, EventPayload>` /
+    `StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>` —
+    streaming channels. Adds the fifth variant
+    `SubscriptionEvent { event_identifier, token, event }`.
+  Splitting keeps non-streaming channels' match patterns clean (no
+  uninhabited event arm to discharge) and makes the schema honestly
+  reflect which channels emit pushed events.
+- `ProtocolVersion`, `ExchangeMode`, `ExchangeHandshake`, and
+  handshake request/reply records.
+- `ExchangeIdentifier`, `StreamEventIdentifier`, `ExchangeLane`,
+  `LaneSequence`, `SessionEpoch` — frame-layer identity for async
+  request/reply correlation and subscription-event placement.
+  `LaneSequence` is per-lane monotonic; both identifier types embed
+  it.
+- `Slot<T>` and `Revision` — frame-bound wire identity records.
+- `Operation<Payload>` — a transparent payload-bearer. Under the
+  contract-local-verb architecture the operation carries only the
+  payload; the payload's NOTA record head names the contract-local
+  verb.
+- `NonEmpty<T>` — the type-level non-empty sequence used as the
+  atomic operation unit inside `Request`.
+- `Request<Payload>` carrying `NonEmpty<Operation<Payload>>` as the
+  atomic unit, with NOTA codec (single op + bracketed sequence).
+- `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
+  per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
+  distinguishes `Completed` from `Aborted { failed_at, reason }`.
+  `SubReply<ReplyPayload>` is the per-op typed sum
+  (`Ok` / `Invalidated` / `Failed` / `Skipped`) — positionally
+  addressed.
+- `RequestBuilder<Payload>` — the generic multi-op constructor with
+  `RequestBuilderError::EmptyRequest`.
+- `RequestPayload` — marker trait carrying the `into_request()`
+  convenience that wraps a payload into a length-1 `Request`.
+- `SubscriptionTokenInner(u64)` — the wire-side subscription routing
+  key; channels wrap it in per-channel typed newtypes.
+- `Request<Payload>::check()` / `into_checked()` — universal-rule
+  enforcement at construction. Under the contract-local-verb
+  architecture the universal rule set is empty; the methods are
+  retained as a stable surface so call sites that defensively
+  validate before sending continue to compile.
+- The `signal_channel!` macro is re-exported from the sibling
+  `signal-frame-macros` proc-macro crate. **The macro is in a
+  transitional state — it still uses the pre-migration verb-tagged
+  input grammar and emits broken code referencing types that no
+  longer exist (`SignalVerb`, `RequestPayload::signal_verb`). The
+  full redesign is deferred — see `macros/README.md`.**
+
+## 2 · Does Not Own
+
+- The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
+  `Subscribe`, `Validate`). Those live in `signal-sema`.
+- `PatternField<T>` and the read-algebra primitives (`Bind`,
+  `Wildcard`). Those live in `signal-sema` alongside the verbs they
+  pair with.
+- Domain records of any kind. Per-component contract crates own
+  those.
+- redb tables, reducers, or actor supervision.
+- Authentication, provenance, or socket-peer policy. Local trust
+  belongs to daemon/socket ingress and to dedicated contracts such
+  as `signal-persona-auth`.
+- Slot allocation, slot dereference, or revision bump behavior.
+  Those belong to the Sema engine.
+- Nexus text parsing or rendering over NOTA syntax beyond the codec
+  impls already in this crate.
+
+## 3 · Constraints
+
+- `signal-frame` stays domain-free; domain records live in contract
+  crates.
+- `signal-frame` stays verb-free at the universal layer. The
+  contract-local verb appears as the record head of the payload that
+  the macro generates per channel; there is no universal verb enum
+  in this crate.
+- Frame length prefixes are exactly 4-byte big-endian payload
+  lengths.
+- Decoding rejects short prefixes, mismatched lengths, and bytecheck
+  failures.
+- Async request/reply matching uses frame-layer `ExchangeIdentifier`
+  (session epoch + lane + sequence), negotiated at handshake.
+  Payloads never carry transport identifiers.
+- Subscription events ride on the acceptor's outbound lane as
+  `StreamingFrameBody::SubscriptionEvent` carrying a
+  `StreamEventIdentifier` (same wire shape as `ExchangeIdentifier`,
+  distinct type) and a `SubscriptionTokenInner` routing key.
+- `signal_channel!` is the standard declaration shape for domain
+  channels. The engine is a proc-macro living in the sibling
+  `signal-frame-macros` crate; `signal-frame` re-exports it as
+  `pub use signal_frame_macros::signal_channel`.
+- `Slot<T>` and `Revision` are wire identity records only. The Sema
+  engine owns allocation, lookup, compare-and-set, and persistence.
+- Text rendering/parsing of NOTA records belongs to NOTA / Nexus
+  projection layers — `signal-frame` only carries the codec impls
+  needed to round-trip its own records.
+
+## 4 · Invariants
+
+- Multi-operation atomicity is structural — the `Request<Payload>`'s
+  `NonEmpty<Operation>` sequence is the unit. No separate `Atomic`
+  verb, no `BatchBuilder`, no `(Batch ...)` NOTA wrapper.
+- rkyv is the Rust-to-Rust wire. Nexus text in NOTA syntax is a
+  human projection outside this crate.
+- Every incoming archive is bytechecked before deserialization.
+- `ExchangeFrameBody` / `StreamingFrameBody` carry handshake /
+  request / reply (plus subscription-event on the streaming form)
+  bodies. No in-band authentication or provenance material.
+- Domain payloads remain typed. `signal-frame` does not become a
+  generic record bag.
+- `Reply` is a typed sum (`Accepted` vs `Rejected`); pre-execution
+  rejection cannot carry per-op results, and accepted replies
+  always do. Illegal states unrepresentable.
+- Per-op replies are positionally addressed — the index in
+  `per_operation` aligns with the originating request's operation
+  index. No universal verb tag.
+
+## 5 · Migration history — from signal-core to signal-frame
+
+This crate was extracted from the former `signal-core` on
+2026-05-19 as part of the contract-local-verb architecture
+redirection. The split:
+
+- `signal-core/src/verb.rs` — the six `SignalVerb` roots — moved
+  to `signal-sema`.
+- `signal-core/src/pattern.rs` — `Bind` / `Wildcard` /
+  `PatternField<T>` — moved to `signal-sema`.
+- `Operation::verb` and `RequestPayload::signal_verb()` — removed.
+  Each operation carries only its payload now; the payload's NOTA
+  record head names the contract-local verb.
+- `Request::check()`'s universal rule set is empty under the new
+  architecture (no verb/payload alignment to check, no
+  Subscribe-position rule — Subscribe is a contract-local verb
+  now). The method survives as a stable surface.
+- `SubReply::Ok/Invalidated/Failed/Skipped` lost their `verb:
+  SignalVerb` discriminator; per-op replies are positionally
+  addressed.
+- `RequestRejectionReason::VerbPayloadMismatch` and
+  `SubscribeOutOfPosition` were removed. Only the receiver-internal
+  pre-execution variant survives.
+- The constant `SIGNAL_CORE_PROTOCOL_VERSION` was renamed
+  `SIGNAL_FRAME_PROTOCOL_VERSION`.
+
+The `signal_channel!` macro is in a transitional state — see
+`macros/README.md` for the deferred redesign that will retire the
+verb-tagged input grammar in favor of `operation <Verb>(<Payload>)`.
+
+## 6 · Code Map
+
+```text
+src/lib.rs            module entry and re-exports
+                      (re-exports signal_channel! from signal-frame-macros)
+src/error.rs          typed frame errors
+src/version.rs        ProtocolVersion + handshake records
+src/identity.rs       typed Slot<T> + Revision wire identities
+src/operation.rs      Operation<Payload>; NOTA codec (delegates to payload)
+src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<P>,
+                      CheckedRequest<P>; Request NOTA codec
+                      (single-op + bracketed sequence)
+src/reply.rs          Reply<ReplyPayload> (Accepted / Rejected),
+                      AcceptedOutcome, SubReply, OperationFailureReason
+src/exchange.rs       SessionEpoch, ExchangeLane, LaneSequence,
+                      ExchangeIdentifier, StreamEventIdentifier,
+                      ExchangeMode, ExchangeHandshake
+src/subscription.rs   SubscriptionTokenInner
+src/non_empty.rs      NonEmpty<T> and NonEmptyError
+src/frame.rs          ExchangeFrame / ExchangeFrameBody,
+                      StreamingFrame / StreamingFrameBody,
+                      length-prefix helpers
+tests/frame.rs        rkyv round-trip + NOTA round-trip tests
+
+macros/               sibling proc-macro crate (transitional state —
+                      see macros/README.md MUST IMPLEMENT)
+  Cargo.toml          proc-macro = true
+  src/lib.rs          #[proc_macro] signal_channel + MUST IMPLEMENT block
+  src/parse.rs        syn parser for channel declaration
+  src/model.rs        ChannelSpec, StreamBlockSpec, VariantSpecs
+  src/validate.rs     semantic checks + span-pointed diagnostics
+  src/emit.rs         quote! output
+  README.md           MUST IMPLEMENT note + redesign plan
+```
+
+## See Also
+
+- `/home/li/primary/skills/contract-repo.md` — workspace discipline
+  for contract crates that build on this kernel.
+- `/home/li/primary/skills/rust-discipline.md` — workspace
+  Rust-side conventions this crate follows.
+- `/home/li/primary/reports/designer/238-signal-architecture-redirection-contract-local-verbs.md`
+- `/home/li/primary/reports/designer/239-signal-architecture-migration-plan.md`

@@ -1,0 +1,24 @@
+[package]
+name         = "signal-frame-macros"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.85"
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/LiGoldragon/signal-frame"
+description  = "Proc-macro engine for `signal_channel!`. Compiles channel declarations into typed request/reply/event vocabularies, frame aliases, and NOTA codecs."
+publish      = false
+
+[lib]
+name = "signal_frame_macros"
+path = "src/lib.rs"
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote       = "1"
+syn         = { version = "2", features = ["full", "extra-traits"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused = "warn"
+dead_code = "warn"
