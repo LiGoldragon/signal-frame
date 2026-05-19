@@ -265,3 +265,294 @@ fn macro_generated_reply_works_with_positioned_subreply() {
         signal_frame::Reply::Rejected { .. } => panic!("expected accepted reply"),
     }
 }
+
+// Observable channel: the macro injects observer-subscription
+// operations, a stream, the publish surface, and a filter-match trait
+// the contract author implements against its own filter type.
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum LedgerObserverFilter {
+    All,
+    OnlyOperations,
+    OnlyEffects,
+}
+
+impl NotaEncode for LedgerObserverFilter {
+    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
+        match self {
+            LedgerObserverFilter::All => {
+                encoder.start_record("All")?;
+                encoder.end_record()
+            }
+            LedgerObserverFilter::OnlyOperations => {
+                encoder.start_record("OnlyOperations")?;
+                encoder.end_record()
+            }
+            LedgerObserverFilter::OnlyEffects => {
+                encoder.start_record("OnlyEffects")?;
+                encoder.end_record()
+            }
+        }
+    }
+}
+
+impl NotaDecode for LedgerObserverFilter {
+    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
+        let head = decoder.peek_record_head()?;
+        match head.as_str() {
+            "All" => {
+                decoder.expect_record_head("All")?;
+                decoder.expect_record_end()?;
+                Ok(Self::All)
+            }
+            "OnlyOperations" => {
+                decoder.expect_record_head("OnlyOperations")?;
+                decoder.expect_record_end()?;
+                Ok(Self::OnlyOperations)
+            }
+            "OnlyEffects" => {
+                decoder.expect_record_head("OnlyEffects")?;
+                decoder.expect_record_end()?;
+                Ok(Self::OnlyEffects)
+            }
+            other => Err(nota_codec::Error::UnknownKindForVerb {
+                verb: "LedgerObserverFilter",
+                got: other.to_string(),
+            }),
+        }
+    }
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct LedgerNote {
+    body: String,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct LedgerAcknowledgement {
+    accepted: bool,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct OperationReceived {
+    operation_kind: String,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct SemaEffectEmitted {
+    effect_label: String,
+}
+
+signal_channel! {
+    channel Ledger {
+        operation Record(LedgerNote),
+    }
+    reply LedgerReply {
+        Recorded(LedgerAcknowledgement),
+    }
+    observable {
+        filter LedgerObserverFilter;
+        event OperationReceived;
+        event SemaEffectEmitted;
+    }
+}
+
+impl LedgerObserverFilterMatch for LedgerObserverFilter {
+    fn matches_operation_received(&self, _event: &OperationReceived) -> bool {
+        matches!(self, Self::All | Self::OnlyOperations)
+    }
+
+    fn matches_sema_effect_emitted(&self, _event: &SemaEffectEmitted) -> bool {
+        matches!(self, Self::All | Self::OnlyEffects)
+    }
+}
+
+#[test]
+fn observable_block_injects_observe_and_unobserve_operations() {
+    let observe =
+        LedgerOperation::Observe(LedgerObserverFilter::All);
+    assert_eq!(observe.kind(), LedgerOperationKind::Observe);
+    assert_eq!(
+        observe.opened_stream(),
+        Some(LedgerStreamKind::ObserverStream)
+    );
+
+    let token = LedgerObserverSubscriptionToken::new(
+        signal_frame::SubscriptionTokenInner::new(42),
+    );
+    let unobserve = LedgerOperation::Unobserve(token);
+    assert_eq!(unobserve.kind(), LedgerOperationKind::Unobserve);
+    assert_eq!(
+        unobserve.closed_stream(),
+        Some(LedgerStreamKind::ObserverStream)
+    );
+}
+
+#[test]
+fn observable_block_injects_observer_stream_and_event_classes() {
+    let received = LedgerEvent::OperationReceived(OperationReceived {
+        operation_kind: "Record".to_string(),
+    });
+    assert_eq!(
+        received.stream_kind(),
+        LedgerStreamKind::ObserverStream
+    );
+
+    let emitted = LedgerEvent::SemaEffectEmitted(SemaEffectEmitted {
+        effect_label: "Assert".to_string(),
+    });
+    assert_eq!(
+        emitted.stream_kind(),
+        LedgerStreamKind::ObserverStream
+    );
+}
+
+#[test]
+fn observable_block_injects_reply_variant_with_freshly_minted_token() {
+    let token = LedgerObserverSubscriptionToken::new(
+        signal_frame::SubscriptionTokenInner::new(7),
+    );
+    let opened = LedgerObserverSubscriptionOpened::new(token);
+    let reply = LedgerReply::ObserverSubscriptionOpened(opened);
+    assert_eq!(reply.kind(), LedgerReplyKind::ObserverSubscriptionOpened);
+}
+
+#[test]
+fn observable_round_trips_observe_and_unobserve_through_nota() {
+    let observe_request =
+        LedgerOperation::Observe(LedgerObserverFilter::OnlyOperations).into_request();
+    let observe_text = encode_to_text(&observe_request);
+    assert_eq!(observe_text, "(Observe (OnlyOperations))");
+
+    let mut decoder = nota_codec::Decoder::new(&observe_text);
+    let decoded = Request::<LedgerOperation>::decode(&mut decoder).expect("decode observe");
+    assert_eq!(decoded, observe_request);
+
+    let token = LedgerObserverSubscriptionToken::new(
+        signal_frame::SubscriptionTokenInner::new(9),
+    );
+    let unobserve_request = LedgerOperation::Unobserve(token).into_request();
+    let unobserve_text = encode_to_text(&unobserve_request);
+    assert_eq!(
+        unobserve_text,
+        "(Unobserve (ObserverSubscriptionToken 9))"
+    );
+
+    let mut decoder = nota_codec::Decoder::new(&unobserve_text);
+    let decoded_unobserve =
+        Request::<LedgerOperation>::decode(&mut decoder).expect("decode unobserve");
+    assert_eq!(decoded_unobserve, unobserve_request);
+}
+
+#[test]
+fn observable_round_trips_observer_subscription_opened_reply() {
+    let token = LedgerObserverSubscriptionToken::new(
+        signal_frame::SubscriptionTokenInner::new(3),
+    );
+    let opened = LedgerObserverSubscriptionOpened::new(token);
+    let reply_payload = LedgerReply::ObserverSubscriptionOpened(opened);
+
+    let text = encode_to_text(&reply_payload);
+    assert_eq!(
+        text,
+        "(ObserverSubscriptionOpened (ObserverSubscriptionOpened (ObserverSubscriptionToken 3)))"
+    );
+
+    let mut decoder = nota_codec::Decoder::new(&text);
+    let decoded = LedgerReply::decode(&mut decoder).expect("decode opened");
+    assert_eq!(decoded, reply_payload);
+}
+
+#[test]
+fn observable_round_trips_operation_received_event() {
+    let event = LedgerEvent::OperationReceived(OperationReceived {
+        operation_kind: "Record".to_string(),
+    });
+
+    let text = encode_to_text(&event);
+    // Outer variant records the macro-injected `OperationReceived`
+    // wire head; the inner record head comes from the contract
+    // author's NotaRecord-derived struct of the same name.
+    let mut decoder = nota_codec::Decoder::new(&text);
+    let decoded = LedgerEvent::decode(&mut decoder).expect("decode event");
+    assert_eq!(decoded, event);
+}
+
+#[test]
+fn observable_observer_set_routes_events_to_matching_observers() {
+    let mut observer_set = LedgerObserverSet::new();
+
+    let all_token = observer_set.register(LedgerObserverFilter::All);
+    let ops_only_token = observer_set.register(LedgerObserverFilter::OnlyOperations);
+    let effects_only_token = observer_set.register(LedgerObserverFilter::OnlyEffects);
+
+    assert_ne!(all_token, ops_only_token);
+    assert_ne!(ops_only_token, effects_only_token);
+    assert_eq!(observer_set.len(), 3);
+    assert!(!observer_set.is_empty());
+
+    let op_event = OperationReceived {
+        operation_kind: "Record".to_string(),
+    };
+    let mut op_recipients: Vec<LedgerObserverSubscriptionToken> = Vec::new();
+    observer_set.publish_operation_received(&op_event, |token, _event| {
+        op_recipients.push(token);
+    });
+    assert_eq!(op_recipients, vec![all_token, ops_only_token]);
+
+    let effect_event = SemaEffectEmitted {
+        effect_label: "Assert".to_string(),
+    };
+    let mut effect_recipients: Vec<LedgerObserverSubscriptionToken> = Vec::new();
+    observer_set.publish_sema_effect_emitted(&effect_event, |token, _event| {
+        effect_recipients.push(token);
+    });
+    assert_eq!(effect_recipients, vec![all_token, effects_only_token]);
+
+    assert!(observer_set.unregister(ops_only_token));
+    assert!(!observer_set.unregister(ops_only_token));
+    assert_eq!(observer_set.len(), 2);
+
+    let mut after_unregister: Vec<LedgerObserverSubscriptionToken> = Vec::new();
+    observer_set.publish_operation_received(&op_event, |token, _event| {
+        after_unregister.push(token);
+    });
+    assert_eq!(after_unregister, vec![all_token]);
+}
+
+#[test]
+fn observable_streaming_frame_alias_carries_observer_events() {
+    let event_identifier = signal_frame::StreamEventIdentifier::new(
+        SessionEpoch::new(1),
+        ExchangeLane::Acceptor,
+        LaneSequence::first(),
+    );
+    let event = LedgerEvent::SemaEffectEmitted(SemaEffectEmitted {
+        effect_label: "Assert".to_string(),
+    });
+    let frame = LedgerFrame::new(StreamingFrameBody::SubscriptionEvent {
+        event_identifier,
+        token: signal_frame::SubscriptionTokenInner::new(11),
+        event: event.clone(),
+    });
+
+    let bytes = frame.encode_length_prefixed().expect("encode");
+    let decoded =
+        StreamingFrame::<LedgerOperation, LedgerReply, LedgerEvent>::decode_length_prefixed(
+            &bytes,
+        )
+        .expect("decode");
+
+    match decoded.into_body() {
+        StreamingFrameBody::SubscriptionEvent {
+            event_identifier: decoded_identifier,
+            token,
+            event: decoded_event,
+        } => {
+            assert_eq!(decoded_identifier, event_identifier);
+            assert_eq!(token, signal_frame::SubscriptionTokenInner::new(11));
+            assert_eq!(decoded_event, event);
+        }
+        _ => panic!("expected subscription event frame"),
+    }
+}

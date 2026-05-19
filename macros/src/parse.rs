@@ -5,8 +5,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Ident, Result, Token, Type, braced};
 
 use crate::model::{
-    ChannelSpec, EventBlockSpec, EventVariantSpec, ReplyBlockSpec, ReplyVariantSpec,
-    RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
+    ChannelSpec, EventBlockSpec, EventVariantSpec, ObservableBlockSpec, ReplyBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
 };
 
 mod keyword {
@@ -20,6 +20,8 @@ mod keyword {
     syn::custom_keyword!(token);
     syn::custom_keyword!(opened);
     syn::custom_keyword!(close);
+    syn::custom_keyword!(observable);
+    syn::custom_keyword!(filter);
 }
 
 impl Parse for ChannelSpec {
@@ -47,6 +49,7 @@ impl Parse for ChannelSpec {
         let mut reply: Option<ReplyBlockSpec> = None;
         let mut event: Option<EventBlockSpec> = None;
         let mut streams: Vec<StreamBlockSpec> = Vec::new();
+        let mut observable: Option<ObservableBlockSpec> = None;
 
         while !input.is_empty() {
             let lookahead = input.lookahead1();
@@ -62,6 +65,11 @@ impl Parse for ChannelSpec {
                 event = Some(input.parse()?);
             } else if lookahead.peek(keyword::stream) {
                 streams.push(input.parse()?);
+            } else if lookahead.peek(keyword::observable) {
+                if observable.is_some() {
+                    return Err(input.error("duplicate `observable` block"));
+                }
+                observable = Some(input.parse()?);
             } else {
                 return Err(lookahead.error());
             }
@@ -77,6 +85,7 @@ impl Parse for ChannelSpec {
             reply,
             event,
             streams,
+            observable,
         })
     }
 }
@@ -203,9 +212,17 @@ impl Parse for StreamBlockSpec {
         let opened = body.parse::<Ident>()?;
         body.parse::<Token![;]>()?;
 
-        body.parse::<keyword::event>()?;
-        let event_variant = body.parse::<Ident>()?;
-        body.parse::<Token![;]>()?;
+        let mut events: Vec<Ident> = Vec::new();
+        while body.peek(keyword::event) {
+            body.parse::<keyword::event>()?;
+            events.push(body.parse::<Ident>()?);
+            body.parse::<Token![;]>()?;
+        }
+        if events.is_empty() {
+            return Err(body.error(
+                "stream block requires at least one `event <Variant>;` slot",
+            ));
+        }
 
         body.parse::<keyword::close>()?;
         let close = body.parse::<Ident>()?;
@@ -215,8 +232,39 @@ impl Parse for StreamBlockSpec {
             name,
             token,
             opened,
-            event_variant,
+            events,
             close,
+        })
+    }
+}
+
+impl Parse for ObservableBlockSpec {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let span_token = input.parse::<keyword::observable>()?;
+        let body;
+        braced!(body in input);
+
+        body.parse::<keyword::filter>()?;
+        let filter = body.parse::<Ident>()?;
+        body.parse::<Token![;]>()?;
+
+        let mut events: Vec<Ident> = Vec::new();
+        while !body.is_empty() {
+            body.parse::<keyword::event>()?;
+            events.push(body.parse::<Ident>()?);
+            body.parse::<Token![;]>()?;
+        }
+        if events.is_empty() {
+            return Err(syn::Error::new(
+                span_token.span,
+                "observable block requires at least one `event <PayloadType>;` slot",
+            ));
+        }
+
+        Ok(ObservableBlockSpec {
+            span: Ident::new("observable", span_token.span),
+            filter,
+            events,
         })
     }
 }

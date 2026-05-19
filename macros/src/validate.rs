@@ -8,9 +8,99 @@ use syn::{Error, Type};
 use crate::model::ChannelSpec;
 
 pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
+    validate_observable_does_not_collide(spec)?;
     validate_variant_uniqueness(spec)?;
     validate_record_head_uniqueness(spec)?;
     validate_stream_relations(spec)?;
+    Ok(())
+}
+
+/// The observable block injects operations named `Observe` and
+/// `Unobserve`, a stream named `ObserverStream`, a reply variant
+/// `ObserverSubscriptionOpened`, and event variants whose names come
+/// from the observable block's `event <Name>;` lines. Catch contract
+/// collisions early with a pointed diagnostic, before the generic
+/// duplicate-variant check fires on the macro-expanded output.
+fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
+    let Some(observable) = &spec.observable else {
+        return Ok(());
+    };
+
+    let mut seen_event_names: HashSet<String> = HashSet::new();
+    for event in &observable.events {
+        let event_name = event.to_string();
+        if !seen_event_names.insert(event_name.clone()) {
+            return Err(Error::new_spanned(
+                event,
+                format!("duplicate event `{event_name}` in observable block"),
+            ));
+        }
+        if event_name == "ObserverSubscriptionToken"
+            || event_name == "ObserverSubscriptionOpened"
+        {
+            return Err(Error::new_spanned(
+                event,
+                format!(
+                    "observable event `{event_name}` collides with a macro-reserved record head",
+                ),
+            ));
+        }
+    }
+
+    for variant in &spec.request.variants {
+        let name = variant.variant_name.to_string();
+        if name == "Observe" || name == "Unobserve" {
+            return Err(Error::new_spanned(
+                &variant.variant_name,
+                format!(
+                    "operation `{name}` collides with the `observable` block's auto-injected operation",
+                ),
+            ));
+        }
+    }
+    for variant in &spec.reply.variants {
+        if variant.variant_name == "ObserverSubscriptionOpened" {
+            return Err(Error::new_spanned(
+                &variant.variant_name,
+                "reply variant `ObserverSubscriptionOpened` collides with the `observable` block's auto-injected reply variant",
+            ));
+        }
+    }
+    if let Some(event_block) = &spec.event {
+        let observable_events: HashSet<String> = observable
+            .events
+            .iter()
+            .map(|event| event.to_string())
+            .collect();
+        for variant in &event_block.variants {
+            let name = variant.variant_name.to_string();
+            if observable_events.contains(&name) {
+                return Err(Error::new_spanned(
+                    &variant.variant_name,
+                    format!(
+                        "event variant `{name}` collides with the `observable` block's auto-injected event variant",
+                    ),
+                ));
+            }
+            let payload_head = projected_record_head(&variant.payload_type);
+            if observable_events.contains(&payload_head) {
+                return Err(Error::new_spanned(
+                    &variant.variant_name,
+                    format!(
+                        "event variant `{name}` projects to record head `{payload_head}` which collides with the `observable` block's auto-injected event payload",
+                    ),
+                ));
+            }
+        }
+    }
+    for stream in &spec.streams {
+        if stream.name == "ObserverStream" {
+            return Err(Error::new_spanned(
+                &stream.name,
+                "stream `ObserverStream` collides with the `observable` block's auto-injected stream",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -215,37 +305,39 @@ fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
                 ),
             ));
         }
-        if !event_variants.contains(&stream.event_variant.to_string()) {
-            return Err(Error::new_spanned(
-                &stream.event_variant,
-                format!(
-                    "stream `{}`: `event {}` does not resolve to a variant in the event block",
-                    stream.name, stream.event_variant,
-                ),
-            ));
-        }
-        let event_variant = spec
-            .event
-            .as_ref()
-            .and_then(|event| {
-                event
-                    .variants
-                    .iter()
-                    .find(|variant| variant.variant_name == stream.event_variant)
-            })
-            .expect("event variant verified above");
-        let event_belongs = event_variant
-            .belongs
-            .as_ref()
-            .expect("event belongs relation verified above");
-        if event_belongs != &stream.name {
-            return Err(Error::new_spanned(
-                &stream.event_variant,
-                format!(
-                    "stream `{}` names event `{}` but that event belongs to stream `{}`",
-                    stream.name, stream.event_variant, event_belongs,
-                ),
-            ));
+        for event_variant_name in &stream.events {
+            if !event_variants.contains(&event_variant_name.to_string()) {
+                return Err(Error::new_spanned(
+                    event_variant_name,
+                    format!(
+                        "stream `{}`: `event {}` does not resolve to a variant in the event block",
+                        stream.name, event_variant_name,
+                    ),
+                ));
+            }
+            let event_variant = spec
+                .event
+                .as_ref()
+                .and_then(|event| {
+                    event
+                        .variants
+                        .iter()
+                        .find(|variant| &variant.variant_name == event_variant_name)
+                })
+                .expect("event variant verified above");
+            let event_belongs = event_variant
+                .belongs
+                .as_ref()
+                .expect("event belongs relation verified above");
+            if event_belongs != &stream.name {
+                return Err(Error::new_spanned(
+                    event_variant_name,
+                    format!(
+                        "stream `{}` names event `{}` but that event belongs to stream `{}`",
+                        stream.name, event_variant_name, event_belongs,
+                    ),
+                ));
+            }
         }
         if !request_variants.contains(&stream.close.to_string()) {
             return Err(Error::new_spanned(

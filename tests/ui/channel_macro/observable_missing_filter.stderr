@@ -1,0 +1,5 @@
+error: expected `filter`
+  --> tests/ui/channel_macro/observable_missing_filter.rs:14:9
+   |
+14 |         event OperationReceived;
+   |         ^^^^^

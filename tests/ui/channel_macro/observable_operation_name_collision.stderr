@@ -1,0 +1,5 @@
+error: operation `Observe` collides with the `observable` block's auto-injected operation
+  --> tests/ui/channel_macro/observable_operation_name_collision.rs:11:19
+   |
+11 |         operation Observe(Watch),
+   |                   ^^^^^^^

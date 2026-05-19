@@ -40,15 +40,65 @@ enum, NOTA codecs) without any verb-tagging machinery:
   NOTA record-head uniqueness, and stream-block cross-references
   carry over unchanged.
 
+## Optional `observable` block
+
+A channel can opt into an observer-subscription surface by declaring
+an `observable` block. When present the macro injects two
+operations (`Observe` / `Unobserve`), an `ObserverStream` whose token
+type is auto-generated, a reply variant
+`ObserverSubscriptionOpened`, and a runtime `<Channel>ObserverSet`
+with `publish_*` methods the daemon's executor calls.
+
+```rust
+signal_channel! {
+    channel Spirit {
+        operation State(Statement),
+        operation Record(Entry),
+    }
+    reply SpiritReply { … }
+    observable {
+        filter ObserverFilter;
+        event OperationReceived;
+        event SemaEffectEmitted;
+    }
+}
+```
+
+The `filter` and each `event` ident names a type the contract crate
+declares. The macro emits a `<Channel>ObserverFilterMatch` trait the
+contract author implements on the filter type — the per-event
+`matches_<event>` method routes deliveries.
+
+Per-event names are workspace-uniform vocabulary
+(`OperationReceived`, `SemaEffectEmitted`) so cross-component
+observers — persona-introspect, debug tooling — subscribe to the
+same record-head language across every observable channel. The
+Rust-side types are channel-prefixed (`<Channel>ObserverSubscriptionToken`,
+`<Channel>ObserverSubscriptionOpened`) so multiple observable
+channels can coexist in the same scope.
+
+The publish methods take a delivery closure
+(`FnMut(<Channel>ObserverSubscriptionToken, &Event)`) — the macro
+filters and routes, the executor / daemon dispatches the event onto
+the matching observers' subscription streams.
+
+The observable block is opt-in: channels without it produce no
+observer surface and remain backward-compatible with the previous
+shape.
+
 ## Validation witnesses
 
 - `tests/channel_macro.rs` proves a positive non-streaming channel,
-  a streaming channel, generated kind methods, frame aliases, and
-  NOTA round trips.
+  a streaming channel, generated kind methods, frame aliases, NOTA
+  round trips, and the observable surface: Observe / Unobserve
+  encoding, stream witnesses, reply variant round-trips, and the
+  observer-set's filter-routing behaviour.
 - `tests/ui/channel_macro/` carries compile-fail witnesses for the
-  retired verb-tagged grammar and the retained structural checks:
-  duplicate record heads, orphan streams, reverse event belongs
-  mismatch, and close-token type mismatch.
+  retired verb-tagged grammar, the retained structural checks
+  (duplicate record heads, orphan streams, reverse event belongs
+  mismatch, close-token type mismatch), and the observable block's
+  failure modes (missing filter, missing events, operation-name
+  collision, duplicate block).
 
 The macro's responsibility is unchanged at the level of intent: take
 one channel declaration and emit the typed request/reply/event

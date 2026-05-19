@@ -85,6 +85,11 @@ executor lowering, logging, introspection).
   `signal-frame-macros` proc-macro crate. It declares
   contract-local operation roots directly:
   `operation Submit(Submission)`, not `Assert Submit(Submission)`.
+  A channel may opt into an observation surface by declaring an
+  `observable` block; the macro then injects `Observe` / `Unobserve`
+  operations, an `ObserverStream`, a subscription token type, and a
+  per-channel `ObserverSet` with `publish_*` methods the daemon's
+  executor calls.
 
 ## 2 · Does Not Own
 

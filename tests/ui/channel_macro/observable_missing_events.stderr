@@ -1,0 +1,5 @@
+error: observable block requires at least one `event <PayloadType>;` slot
+  --> tests/ui/channel_macro/observable_missing_events.rs:14:5
+   |
+14 |     observable {
+   |     ^^^^^^^^^^
