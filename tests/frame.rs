@@ -3,7 +3,7 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     AcceptedOutcome, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane,
     FrameError, HandshakeRejectionReason, HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty,
-    Operation, OperationFailureReason, ProtocolVersion, Reply, Request, RequestPayload,
+    OperationFailureReason, ProtocolVersion, Reply, Request, RequestPayload,
     Revision, SessionEpoch, Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody,
     SubReply, SubscriptionTokenInner,
 };
@@ -81,8 +81,8 @@ fn request_frame_round_trips() {
             assert_eq!(decoded_exchange, exchange);
             assert_eq!(decoded_request, request);
             assert_eq!(
-                decoded_request.operations().head().payload,
-                DomainRequest::new("Node")
+                decoded_request.payloads().head(),
+                &DomainRequest::new("Node")
             );
         }
         _ => panic!("expected request frame"),
@@ -90,30 +90,14 @@ fn request_frame_round_trips() {
 }
 
 #[test]
-fn request_from_payload_wraps_single_operation() {
+fn request_from_payload_wraps_single_payload() {
     let request = Request::from_payload(DomainRequest::new("Node"));
 
-    assert_eq!(request.operations().len(), 1);
+    assert_eq!(request.payloads().len(), 1);
     assert_eq!(
-        request.operations().head().payload,
-        DomainRequest::new("Node")
+        request.payloads().head(),
+        &DomainRequest::new("Node")
     );
-}
-
-#[test]
-fn check_passes_on_well_formed_request() {
-    let request = Request::from_payload(DomainRequest::new("Node"));
-
-    request.check().expect("well-formed request checks");
-}
-
-#[test]
-fn into_checked_returns_checked_request_on_success() {
-    let operation = Operation::new(DomainRequest::new("Node"));
-    let request = Request::from_operations(NonEmpty::single(operation));
-
-    let checked = request.into_checked().expect("check passes");
-    assert_eq!(checked.operations.len(), 1);
 }
 
 #[test]
@@ -237,10 +221,10 @@ fn typed_slot_and_revision_round_trip_inside_request_frame() {
             request,
         } => {
             assert_eq!(decoded_exchange, exchange);
-            let head = request.operations().head();
-            assert_eq!(head.payload, payload);
-            assert_eq!(head.payload.slot.number(), 42);
-            assert_eq!(head.payload.expected_revision.number(), 0);
+            let head = request.payloads().head();
+            assert_eq!(head, &payload);
+            assert_eq!(head.slot.number(), 42);
+            assert_eq!(head.expected_revision.number(), 0);
         }
         _ => panic!("expected request frame"),
     }
@@ -334,11 +318,11 @@ fn streaming_frame_subscription_event_round_trips() {
     }
 }
 
-// ─── Operation/Request NOTA witnesses under the contract-local shape ───
+// ─── Request NOTA witnesses under the contract-local shape ───
 //
-// Under the contract-local-verb architecture, `Operation<Payload>`
-// delegates to the payload directly — no outer verb wrapper appears
-// in the NOTA text. The payload (typically an enum produced by the
+// Under the contract-local-verb architecture, `Request<Payload>`
+// holds payloads directly — no outer verb wrapper, no per-operation
+// wrapper. The payload (typically an enum produced by the
 // `signal_channel!` macro) emits its own record head naming the
 // contract-local verb.
 
@@ -446,16 +430,16 @@ fn single_op_request_round_trips_without_outer_verb_wrapper() {
 
     let decoded = decode_request_from_text(&text).expect("decode");
     assert_eq!(decoded, request);
-    assert_eq!(decoded.operations.len(), 1);
+    assert_eq!(decoded.payloads.len(), 1);
 }
 
 #[test]
 fn multi_op_request_round_trips_through_sequence() {
-    let request = Request::from_operations(NonEmpty::from_head_and_tail(
-        Operation::new(NotaChannelRequest::Submit(NotaSubmit { text: "one".into() })),
-        vec![Operation::new(NotaChannelRequest::Inbox(NotaInbox {
+    let request = Request::from_payloads(NonEmpty::from_head_and_tail(
+        NotaChannelRequest::Submit(NotaSubmit { text: "one".into() }),
+        vec![NotaChannelRequest::Inbox(NotaInbox {
             name: "operator".into(),
-        }))],
+        })],
     ));
     let text = encode_to_text(&request);
 
@@ -463,7 +447,7 @@ fn multi_op_request_round_trips_through_sequence() {
 
     let decoded = decode_request_from_text(&text).expect("decode");
     assert_eq!(decoded, request);
-    assert_eq!(decoded.operations.len(), 2);
+    assert_eq!(decoded.payloads.len(), 2);
 }
 
 #[test]

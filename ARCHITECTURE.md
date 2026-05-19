@@ -61,15 +61,14 @@ executor lowering, logging, introspection).
   `LaneSequence` is per-lane monotonic; both identifier types embed
   it.
 - `Slot<T>` and `Revision` — frame-bound wire identity records.
-- `Operation<Payload>` — a transparent payload-bearer. Under the
-  contract-local-verb architecture the operation carries only the
-  payload; the payload's NOTA record head names the contract-local
-  verb.
 - `NonEmpty<T>` — the type-level non-empty sequence used as the
-  ordered operation unit inside `Request`.
-- `Request<Payload>` carrying `NonEmpty<Operation<Payload>>` as the
-  ordered exchange unit, with NOTA codec (single operation +
-  bracketed sequence).
+  ordered payload unit inside `Request`.
+- `Request<Payload>` carrying `NonEmpty<Payload>` as the ordered
+  exchange unit, with NOTA codec (single payload + bracketed
+  sequence). Each payload is itself a contract operation; the
+  payload's NOTA record head names the contract-local verb. No
+  per-operation wrapper appears — the previous `Operation<Payload>`
+  transparent wrapper has been collapsed out.
 - `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
   per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
   distinguishes `Completed` from `Aborted { failed_at, reason }`.
@@ -82,11 +81,6 @@ executor lowering, logging, introspection).
   convenience that wraps a payload into a length-1 `Request`.
 - `SubscriptionTokenInner(u64)` — the wire-side subscription routing
   key; channels wrap it in per-channel typed newtypes.
-- `Request<Payload>::check()` / `into_checked()` — universal-rule
-  enforcement at construction. Under the contract-local-verb
-  architecture the universal rule set is empty; the methods are
-  retained as a stable surface so call sites that defensively
-  validate before sending continue to compile.
 - The `signal_channel!` macro is re-exported from the sibling
   `signal-frame-macros` proc-macro crate. It declares
   contract-local operation roots directly:
@@ -141,8 +135,8 @@ executor lowering, logging, introspection).
 
 ## 4 · Invariants
 
-- Multi-operation request shape is structural — the
-  `Request<Payload>`'s `NonEmpty<Operation>` sequence preserves
+- Multi-payload request shape is structural — the
+  `Request<Payload>`'s `NonEmpty<Payload>` sequence preserves
   order and aligns replies positionally. Database atomicity belongs
   to `signal-sema` / `sema-engine` or to a contract that explicitly
   promises it.
@@ -172,18 +166,26 @@ redirection. The split:
 - `signal-core/src/pattern.rs` — `Bind` / `Wildcard` /
   `PatternField<T>` — moved to `signal-sema`.
 - `Operation::verb` and `RequestPayload::signal_verb()` — removed.
-  Each operation carries only its payload now; the payload's NOTA
-  record head names the contract-local verb.
-- `Request::check()`'s universal rule set is empty under the new
-  architecture (no verb/payload alignment to check, no
-  Subscribe-position rule — Subscribe is a contract-local verb
-  now). The method survives as a stable surface.
+  Each payload is itself a contract operation now; the payload's
+  NOTA record head names the contract-local verb. The transparent
+  `Operation<Payload>` wrapper has since been collapsed out too — a
+  `Request<Payload>` is now `NonEmpty<Payload>` directly. Per-op
+  metadata, if a contract ever needs it, goes in the payload type,
+  not in a kernel wrapper.
+- `Request::check()` and `Request::into_checked()` (and the
+  `CheckedRequest<Payload>` shape) — dropped. With the universal
+  verb-shaped rules gone, the function was always `Ok(())` and lied
+  about doing work. Channel-specific validation belongs in daemon
+  executors or in payload constructors.
 - `SubReply::Ok/Invalidated/Failed/Skipped` lost their `verb:
   SignalVerb` discriminator; per-operation replies are positionally
   addressed.
 - `RequestRejectionReason::VerbPayloadMismatch` and
   `SubscribeOutOfPosition` were removed. Only the receiver-internal
-  pre-execution variant survives.
+  pre-execution variant survives — daemons can still surface
+  pre-execution failures via `Reply::Rejected { reason:
+  RequestRejectionReason::Internal }` or via channel-defined reply
+  variants.
 - The constant `SIGNAL_CORE_PROTOCOL_VERSION` was renamed
   `SIGNAL_FRAME_PROTOCOL_VERSION`.
 
@@ -198,10 +200,8 @@ src/lib.rs            module entry and re-exports
 src/error.rs          typed frame errors
 src/version.rs        ProtocolVersion + handshake records
 src/identity.rs       typed Slot<T> + Revision wire identities
-src/operation.rs      Operation<Payload>; NOTA codec (delegates to payload)
-src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<Payload>,
-                      CheckedRequest<Payload>; Request NOTA codec
-                      (single operation + bracketed sequence)
+src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<Payload>;
+                      Request NOTA codec (single payload + bracketed sequence)
 src/reply.rs          Reply<ReplyPayload> (Accepted / Rejected),
                       AcceptedOutcome, SubReply, OperationFailureReason
 src/exchange.rs       SessionEpoch, ExchangeLane, LaneSequence,

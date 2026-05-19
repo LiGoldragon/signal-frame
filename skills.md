@@ -6,8 +6,9 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   contract crates (`signal-<component>`).
 - Keep this crate verb-free. The six Sema verbs (`Assert`, `Mutate`,
   `Retract`, `Match`, `Subscribe`, `Validate`) live in `signal-sema`,
-  not here. `Operation<Payload>` and `Request<Payload>` carry payloads
-  directly without a universal verb tag.
+  not here. `Request<Payload>` carries payloads directly — each payload
+  is itself a contract operation whose NOTA record head names the
+  contract-local verb. There is no per-operation kernel wrapper.
 - Keep runtime code out: no actors, tokio loops, redb stores, terminal
   adapters, or CLI parsing.
 - Add tests that round-trip real typed frames through rkyv. Do not

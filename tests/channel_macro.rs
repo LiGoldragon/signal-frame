@@ -2,8 +2,8 @@ use nota_codec::{NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
-    Operation, Request, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody,
-    SubReply, signal_channel,
+    Request, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody, SubReply,
+    signal_channel,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -104,17 +104,15 @@ fn macro_emits_contract_local_operation_enum_without_signal_verb() {
     assert_eq!(operation.kind(), MessageOperationKind::Submit);
 
     let request = operation.into_request();
-    assert_eq!(request.operations().len(), 1);
+    assert_eq!(request.payloads().len(), 1);
     assert_eq!(encode_to_text(&request), "(Submit (Submission hello))");
 }
 
 #[test]
 fn macro_request_text_round_trips_through_contract_local_heads() {
-    let request = Request::from_operations(NonEmpty::from_head_and_tail(
-        Operation::new(MessageOperation::Submit(Submission::new("first"))),
-        vec![Operation::new(MessageOperation::Query(InboxQuery::new(
-            "operator",
-        )))],
+    let request = Request::from_payloads(NonEmpty::from_head_and_tail(
+        MessageOperation::Submit(Submission::new("first")),
+        vec![MessageOperation::Query(InboxQuery::new("operator"))],
     ));
     let text = encode_to_text(&request);
 

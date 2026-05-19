@@ -24,13 +24,15 @@ signal_channel! {
 }
 ```
 
-The macro emits the same outputs (`Operation` enum, `Request`
-wrapper, `Frame` alias, `RequestBuilder`, NOTA codecs) without any
-verb-tagging machinery:
+The macro emits the same outputs (contract-local operation enum,
+`Frame` alias, `Request` / `RequestBuilder` aliases over the payload
+enum, NOTA codecs) without any verb-tagging machinery:
 
 - No `SignalVerb` references — the verb spine is gone at this layer.
 - No `signal_verb()` method on `RequestPayload`.
-- No `verb` field on `Operation<Payload>`.
+- No per-operation kernel wrapper — `Request<Payload>` carries
+  `NonEmpty<Payload>` directly. Per-op metadata, if a contract ever
+  needs it, goes in the payload type.
 - No verb-membership check or stream-opening rule tied to a specific
   verb name. `Subscribe`, when a contract uses that word, is just a
   contract-local operation like any other.

@@ -18,8 +18,8 @@
 //!
 //! The macro emits the same frame-kernel outputs without any
 //! universal verb tag: no `SignalVerb`, no `signal_verb()` method,
-//! and no `Operation::verb` field. Contract-local operation roots are
-//! the generated request-payload enum variants.
+//! and no per-operation kernel wrapper. Contract-local operation
+//! roots are the generated request-payload enum variants.
 //!
 //! The macro reads one typed channel declaration and emits the
 //! request/reply/event payload enums, kind enums, frame aliases,
