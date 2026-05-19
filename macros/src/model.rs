@@ -36,7 +36,6 @@ pub(crate) struct StreamBlockSpec {
 }
 
 pub(crate) struct RequestVariantSpec {
-    pub(crate) verb_keyword: Ident,
     pub(crate) variant_name: Ident,
     pub(crate) payload_type: Type,
     pub(crate) opens: Option<Ident>,
@@ -58,12 +57,3 @@ impl ChannelSpec {
         self.event.is_some() || !self.streams.is_empty()
     }
 }
-
-pub(crate) const SIGNAL_VERBS: [&str; 6] = [
-    "Assert",
-    "Mutate",
-    "Retract",
-    "Match",
-    "Subscribe",
-    "Validate",
-];

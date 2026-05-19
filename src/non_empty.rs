@@ -48,6 +48,10 @@ impl<Value> NonEmpty<Value> {
         1 + self.tail.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     pub fn iter(&self) -> NonEmptyIterator<'_, Value> {
         NonEmptyIterator {
             head: Some(&self.head),

@@ -11,7 +11,7 @@ use crate::model::{
 
 mod keyword {
     syn::custom_keyword!(channel);
-    syn::custom_keyword!(request);
+    syn::custom_keyword!(operation);
     syn::custom_keyword!(reply);
     syn::custom_keyword!(event);
     syn::custom_keyword!(stream);
@@ -26,41 +26,47 @@ impl Parse for ChannelSpec {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         input.parse::<keyword::channel>()?;
         let name = input.parse::<Ident>()?;
-        let body;
-        braced!(body in input);
 
-        let mut request: Option<RequestBlockSpec> = None;
+        let operation_body;
+        braced!(operation_body in input);
+
+        let request_name = Ident::new(&format!("{name}Operation"), name.span());
+        let mut request_variants = Vec::new();
+        while !operation_body.is_empty() {
+            request_variants.push(operation_body.parse::<RequestVariantSpec>()?);
+            if !operation_body.is_empty() {
+                operation_body.parse::<Token![,]>()?;
+            }
+        }
+
+        let request = RequestBlockSpec {
+            name: request_name,
+            variants: request_variants,
+        };
+
         let mut reply: Option<ReplyBlockSpec> = None;
         let mut event: Option<EventBlockSpec> = None;
         let mut streams: Vec<StreamBlockSpec> = Vec::new();
 
-        while !body.is_empty() {
-            let lookahead = body.lookahead1();
-            if lookahead.peek(keyword::request) {
-                if request.is_some() {
-                    return Err(body.error("duplicate `request` block"));
-                }
-                request = Some(body.parse()?);
-            } else if lookahead.peek(keyword::reply) {
+        while !input.is_empty() {
+            let lookahead = input.lookahead1();
+            if lookahead.peek(keyword::reply) {
                 if reply.is_some() {
-                    return Err(body.error("duplicate `reply` block"));
+                    return Err(input.error("duplicate `reply` block"));
                 }
-                reply = Some(body.parse()?);
+                reply = Some(input.parse()?);
             } else if lookahead.peek(keyword::event) {
                 if event.is_some() {
-                    return Err(body.error("duplicate `event` block"));
+                    return Err(input.error("duplicate `event` block"));
                 }
-                event = Some(body.parse()?);
+                event = Some(input.parse()?);
             } else if lookahead.peek(keyword::stream) {
-                streams.push(body.parse()?);
+                streams.push(input.parse()?);
             } else {
                 return Err(lookahead.error());
             }
         }
 
-        let request = request.ok_or_else(|| {
-            syn::Error::new_spanned(&name, "channel declaration requires a `request` block")
-        })?;
         let reply = reply.ok_or_else(|| {
             syn::Error::new_spanned(&name, "channel declaration requires a `reply` block")
         })?;
@@ -77,7 +83,6 @@ impl Parse for ChannelSpec {
 
 impl Parse for RequestBlockSpec {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
-        input.parse::<keyword::request>()?;
         let name = input.parse::<Ident>()?;
         let body;
         braced!(body in input);
@@ -95,7 +100,7 @@ impl Parse for RequestBlockSpec {
 
 impl Parse for RequestVariantSpec {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
-        let verb_keyword = input.parse::<Ident>()?;
+        input.parse::<keyword::operation>()?;
         let variant_name = input.parse::<Ident>()?;
         let payload;
         syn::parenthesized!(payload in input);
@@ -107,7 +112,6 @@ impl Parse for RequestVariantSpec {
             None
         };
         Ok(RequestVariantSpec {
-            verb_keyword,
             variant_name,
             payload_type,
             opens,

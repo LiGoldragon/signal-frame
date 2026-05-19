@@ -1,13 +1,12 @@
 //! Reply: the typed response shape for a frame-layer exchange.
 //!
 //! Pre-execution rejection and in-execution abort are different
-//! categories: one has no per-op results because no op ran; the other
-//! has per-op results because some did. Splitting the variants makes
+//! categories: one has no per-operation results because no operation ran;
+//! the other has per-operation results because some did. Splitting the variants makes
 //! illegal states unrepresentable.
 //!
-//! Under the contract-local-verb architecture (see
-//! `primary/reports/designer/238` and `/239`), per-op replies no longer
-//! carry a universal `SignalVerb` tag. The per-op reply is
+//! Under the contract-local-verb architecture, per-operation replies no longer
+//! carry a universal `SignalVerb` tag. The per-operation reply is
 //! positionally addressed — its index in the `per_operation`
 //! [`NonEmpty`] matches the index in the originating request's
 //! operation sequence.
@@ -22,7 +21,7 @@ use crate::non_empty::NonEmpty;
 /// illegal states unrepresentable.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Reply<ReplyPayload> {
-    /// Request was accepted for execution. Per-op results follow.
+    /// Request was accepted for execution. Per-operation results follow.
     /// `outcome` distinguishes all-committed from aborted-at-N.
     Accepted {
         outcome: AcceptedOutcome,
@@ -30,7 +29,7 @@ pub enum Reply<ReplyPayload> {
     },
     /// Request was rejected before any op began (pre-flight rule
     /// violation: decode error, malformed shape, daemon-specific
-    /// pre-execution policy). No per-op results because no op ran.
+    /// pre-execution policy). No per-operation results because no operation ran.
     Rejected { reason: RequestRejectionReason },
 }
 
@@ -107,19 +106,19 @@ pub enum OperationFailureReason {
 /// operation index. No universal verb tag is carried.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum SubReply<ReplyPayload> {
-    /// Op ran and committed/completed; only emitted under
+    /// Operation ran and committed/completed; only emitted under
     /// [`AcceptedOutcome::Completed`].
     Ok { payload: ReplyPayload },
-    /// Op ran but its result is no longer authoritative because the
+    /// Operation ran but its result is no longer authoritative because the
     /// request as a whole aborted.
     Invalidated,
-    /// Op was attempted and failed; this is the cause of the abort.
+    /// Operation was attempted and failed; this is the cause of the abort.
     /// Exactly one per [`AcceptedOutcome::Aborted`] reply, at
     /// `failed_at`.
     Failed {
         reason: OperationFailureReason,
         detail: Option<ReplyPayload>,
     },
-    /// Op never ran because an earlier op failed.
+    /// Operation never ran because an earlier operation failed.
     Skipped,
 }

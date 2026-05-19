@@ -1,0 +1,5 @@
+error: stream `Lifecycle` is orphaned — no request operation opens it
+  --> tests/ui/channel_macro/orphan_stream.rs:19:12
+   |
+19 |     stream Lifecycle {
+   |            ^^^^^^^^^

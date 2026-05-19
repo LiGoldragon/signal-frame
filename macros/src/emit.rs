@@ -1,12 +1,6 @@
 //! Code emission. Generates the typed payload enums, kind enums,
 //! `RequestPayload` impl, frame aliases, stream-relation witnesses,
 //! and NOTA codec impls.
-//!
-//! NOTE: This emitter still encodes the pre-migration verb-tagged
-//! shape — it emits `::signal_frame::SignalVerb` and
-//! `signal_verb()` references that do not exist in signal-frame.
-//! The full redesign to contract-local verbs is deferred; see the
-//! MUST IMPLEMENT block in `lib.rs` and `../README.md`.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -119,19 +113,8 @@ fn emit_event_enum(block: &EventBlockSpec) -> TokenStream {
 
 fn emit_request_payload_impl(block: &RequestBlockSpec) -> TokenStream {
     let name = &block.name;
-    let arms = block.variants.iter().map(|v| {
-        let variant = &v.variant_name;
-        let verb = &v.verb_keyword;
-        quote! { Self::#variant(_) => ::signal_frame::SignalVerb::#verb }
-    });
     quote! {
-        impl ::signal_frame::RequestPayload for #name {
-            fn signal_verb(&self) -> ::signal_frame::SignalVerb {
-                match self {
-                    #( #arms, )*
-                }
-            }
-        }
+        impl ::signal_frame::RequestPayload for #name {}
     }
 }
 

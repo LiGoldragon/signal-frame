@@ -5,29 +5,12 @@ use std::collections::HashSet;
 
 use syn::{Error, Type};
 
-use crate::model::{ChannelSpec, SIGNAL_VERBS};
+use crate::model::ChannelSpec;
 
 pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
-    validate_verbs(spec)?;
     validate_variant_uniqueness(spec)?;
     validate_record_head_uniqueness(spec)?;
     validate_stream_relations(spec)?;
-    Ok(())
-}
-
-fn validate_verbs(spec: &ChannelSpec) -> syn::Result<()> {
-    for variant in &spec.request.variants {
-        let name = variant.verb_keyword.to_string();
-        if !SIGNAL_VERBS.iter().any(|verb| *verb == name) {
-            return Err(Error::new_spanned(
-                &variant.verb_keyword,
-                format!(
-                    "`{name}` is not a SignalVerb; expected one of {}",
-                    SIGNAL_VERBS.join(", "),
-                ),
-            ));
-        }
-    }
     Ok(())
 }
 
@@ -128,36 +111,9 @@ fn projected_record_head(payload: &Type) -> String {
 }
 
 fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
-    for variant in &spec.request.variants {
-        if let Some(opens) = &variant.opens {
-            if variant.verb_keyword != "Subscribe" {
-                return Err(Error::new_spanned(
-                    opens,
-                    format!(
-                        "`opens {}` is only valid on Subscribe request variants; `{}` is tagged `{}`",
-                        opens, variant.variant_name, variant.verb_keyword,
-                    ),
-                ));
-            }
-        }
-    }
-
-    let subscribe_variants: Vec<_> = spec
-        .request
-        .variants
-        .iter()
-        .filter(|v| v.verb_keyword == "Subscribe")
-        .collect();
-    let has_subscribes = !subscribe_variants.is_empty();
     let has_streams = !spec.streams.is_empty();
     let has_events = spec.event.is_some();
 
-    if has_subscribes && !has_streams {
-        return Err(Error::new_spanned(
-            &subscribe_variants[0].variant_name,
-            "channel has Subscribe variants but no `stream` block — Subscribe semantics need a declared stream relation",
-        ));
-    }
     if has_streams && !has_events {
         return Err(Error::new_spanned(
             &spec.name,
@@ -170,17 +126,11 @@ fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
             "channel has an `event` block but no `stream` block — events must belong to a declared stream",
         ));
     }
-    if has_streams && !has_subscribes {
-        return Err(Error::new_spanned(
-            &spec.streams[0].name,
-            "channel has `stream` blocks but no Subscribe variants — declare the request operation that opens the stream",
-        ));
-    }
 
     let stream_names: HashSet<String> = spec.streams.iter().map(|s| s.name.to_string()).collect();
 
     let mut opened_stream_names: HashSet<String> = HashSet::new();
-    for variant in &subscribe_variants {
+    for variant in &spec.request.variants {
         if let Some(opens) = &variant.opens {
             let opens_name = opens.to_string();
             if !stream_names.contains(&opens_name) {
@@ -190,11 +140,6 @@ fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
                 ));
             }
             opened_stream_names.insert(opens_name);
-        } else if has_streams {
-            return Err(Error::new_spanned(
-                &variant.variant_name,
-                "Subscribe variant must annotate `opens <StreamName>` when the channel declares streams",
-            ));
         }
     }
 
@@ -203,7 +148,9 @@ fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
         if !opened_stream_names.contains(&stream_name) {
             return Err(Error::new_spanned(
                 &stream.name,
-                format!("stream `{stream_name}` is orphaned — no Subscribe variant opens it",),
+                format!(
+                    "stream `{stream_name}` is orphaned — no request operation opens it",
+                ),
             ));
         }
     }
@@ -316,15 +263,6 @@ fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
             .iter()
             .find(|v| v.variant_name == stream.close)
             .expect("close variant verified above");
-        if close_variant.verb_keyword != "Retract" {
-            return Err(Error::new_spanned(
-                &stream.close,
-                format!(
-                    "stream `{}`: close variant `{}` must be tagged `Retract`",
-                    stream.name, stream.close,
-                ),
-            ));
-        }
         let token = &stream.token;
         let payload_type = &close_variant.payload_type;
         let stream_token = quote::quote!(#token).to_string();

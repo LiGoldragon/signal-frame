@@ -15,7 +15,6 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
 - Use full English identifiers and keep reusable behavior on
   data-bearing types.
 - The `signal_channel!` macro lives in the sibling `signal-frame-macros`
-  proc-macro crate and is re-exported from this crate's `lib.rs`. The
-  macro currently retains its pre-migration verb-tagged input shape —
-  see `macros/README.md` for the redesign that lifts contract-local
-  operations into the macro grammar.
+  proc-macro crate and is re-exported from this crate's `lib.rs`. It
+  declares contract-local operations directly:
+  `operation Submit(Submission)`, not `Assert Submit(Submission)`.

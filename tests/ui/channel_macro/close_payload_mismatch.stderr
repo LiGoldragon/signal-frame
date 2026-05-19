@@ -1,0 +1,5 @@
+error: stream `Lifecycle`: close variant carries `StopPayload` but stream's `token` is `StreamToken` — types must match
+  --> tests/ui/channel_macro/close_payload_mismatch.rs:24:15
+   |
+24 |         close Stop;
+   |               ^^^^

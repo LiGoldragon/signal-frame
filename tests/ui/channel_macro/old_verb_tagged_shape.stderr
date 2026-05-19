@@ -1,0 +1,5 @@
+error: expected `operation`
+ --> tests/ui/channel_macro/old_verb_tagged_shape.rs:8:9
+  |
+8 |         Assert Submit(Submission),
+  |         ^^^^^^

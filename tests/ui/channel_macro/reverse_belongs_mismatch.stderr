@@ -1,0 +1,5 @@
+error: stream `Lifecycle` names event `Event` but that event belongs to stream `OtherLifecycle`
+  --> tests/ui/channel_macro/reverse_belongs_mismatch.rs:24:15
+   |
+24 |         event Event;
+   |               ^^^^^

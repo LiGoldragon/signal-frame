@@ -13,11 +13,7 @@ records, exchange identifiers, and the request/reply/event shape.
 `signal-frame` is the renamed successor to the former `signal-core`.
 The six Sema verbs (`Assert` / `Mutate` / `Retract` / `Match` /
 `Subscribe` / `Validate`) that used to live in this crate have moved
-to the sibling crate `signal-sema`. See
-`primary/reports/designer/238-signal-architecture-redirection-contract-local-verbs.md`
-and `primary/reports/designer/239-signal-architecture-migration-plan.md`
-in the primary workspace for the architectural redirection that
-produced this split.
+to the sibling crate `signal-sema`.
 
 ## 0 · TL;DR
 
@@ -70,16 +66,17 @@ executor lowering, logging, introspection).
   payload; the payload's NOTA record head names the contract-local
   verb.
 - `NonEmpty<T>` — the type-level non-empty sequence used as the
-  atomic operation unit inside `Request`.
+  ordered operation unit inside `Request`.
 - `Request<Payload>` carrying `NonEmpty<Operation<Payload>>` as the
-  atomic unit, with NOTA codec (single op + bracketed sequence).
+  ordered exchange unit, with NOTA codec (single operation +
+  bracketed sequence).
 - `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
   per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
   distinguishes `Completed` from `Aborted { failed_at, reason }`.
-  `SubReply<ReplyPayload>` is the per-op typed sum
+  `SubReply<ReplyPayload>` is the per-operation typed sum
   (`Ok` / `Invalidated` / `Failed` / `Skipped`) — positionally
   addressed.
-- `RequestBuilder<Payload>` — the generic multi-op constructor with
+- `RequestBuilder<Payload>` — the generic multi-operation constructor with
   `RequestBuilderError::EmptyRequest`.
 - `RequestPayload` — marker trait carrying the `into_request()`
   convenience that wraps a payload into a length-1 `Request`.
@@ -91,11 +88,9 @@ executor lowering, logging, introspection).
   retained as a stable surface so call sites that defensively
   validate before sending continue to compile.
 - The `signal_channel!` macro is re-exported from the sibling
-  `signal-frame-macros` proc-macro crate. **The macro is in a
-  transitional state — it still uses the pre-migration verb-tagged
-  input grammar and emits broken code referencing types that no
-  longer exist (`SignalVerb`, `RequestPayload::signal_verb`). The
-  full redesign is deferred — see `macros/README.md`.**
+  `signal-frame-macros` proc-macro crate. It declares
+  contract-local operation roots directly:
+  `operation Submit(Submission)`, not `Assert Submit(Submission)`.
 
 ## 2 · Does Not Own
 
@@ -146,9 +141,11 @@ executor lowering, logging, introspection).
 
 ## 4 · Invariants
 
-- Multi-operation atomicity is structural — the `Request<Payload>`'s
-  `NonEmpty<Operation>` sequence is the unit. No separate `Atomic`
-  verb, no `BatchBuilder`, no `(Batch ...)` NOTA wrapper.
+- Multi-operation request shape is structural — the
+  `Request<Payload>`'s `NonEmpty<Operation>` sequence preserves
+  order and aligns replies positionally. Database atomicity belongs
+  to `signal-sema` / `sema-engine` or to a contract that explicitly
+  promises it.
 - rkyv is the Rust-to-Rust wire. Nexus text in NOTA syntax is a
   human projection outside this crate.
 - Every incoming archive is bytechecked before deserialization.
@@ -158,9 +155,9 @@ executor lowering, logging, introspection).
 - Domain payloads remain typed. `signal-frame` does not become a
   generic record bag.
 - `Reply` is a typed sum (`Accepted` vs `Rejected`); pre-execution
-  rejection cannot carry per-op results, and accepted replies
+  rejection cannot carry per-operation results, and accepted replies
   always do. Illegal states unrepresentable.
-- Per-op replies are positionally addressed — the index in
+- Per-operation replies are positionally addressed — the index in
   `per_operation` aligns with the originating request's operation
   index. No universal verb tag.
 
@@ -182,7 +179,7 @@ redirection. The split:
   Subscribe-position rule — Subscribe is a contract-local verb
   now). The method survives as a stable surface.
 - `SubReply::Ok/Invalidated/Failed/Skipped` lost their `verb:
-  SignalVerb` discriminator; per-op replies are positionally
+  SignalVerb` discriminator; per-operation replies are positionally
   addressed.
 - `RequestRejectionReason::VerbPayloadMismatch` and
   `SubscribeOutOfPosition` were removed. Only the receiver-internal
@@ -190,9 +187,8 @@ redirection. The split:
 - The constant `SIGNAL_CORE_PROTOCOL_VERSION` was renamed
   `SIGNAL_FRAME_PROTOCOL_VERSION`.
 
-The `signal_channel!` macro is in a transitional state — see
-`macros/README.md` for the deferred redesign that will retire the
-verb-tagged input grammar in favor of `operation <Verb>(<Payload>)`.
+The `signal_channel!` macro now accepts contract-local operations
+directly through `operation <Verb>(<Payload>)`.
 
 ## 6 · Code Map
 
@@ -203,9 +199,9 @@ src/error.rs          typed frame errors
 src/version.rs        ProtocolVersion + handshake records
 src/identity.rs       typed Slot<T> + Revision wire identities
 src/operation.rs      Operation<Payload>; NOTA codec (delegates to payload)
-src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<P>,
-                      CheckedRequest<P>; Request NOTA codec
-                      (single-op + bracketed sequence)
+src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<Payload>,
+                      CheckedRequest<Payload>; Request NOTA codec
+                      (single operation + bracketed sequence)
 src/reply.rs          Reply<ReplyPayload> (Accepted / Rejected),
                       AcceptedOutcome, SubReply, OperationFailureReason
 src/exchange.rs       SessionEpoch, ExchangeLane, LaneSequence,
@@ -217,16 +213,20 @@ src/frame.rs          ExchangeFrame / ExchangeFrameBody,
                       StreamingFrame / StreamingFrameBody,
                       length-prefix helpers
 tests/frame.rs        rkyv round-trip + NOTA round-trip tests
+tests/channel_macro.rs
+                      positive macro witnesses for non-streaming and
+                      streaming channels
+tests/ui/channel_macro/
+                      compile-fail macro witnesses
 
-macros/               sibling proc-macro crate (transitional state —
-                      see macros/README.md MUST IMPLEMENT)
+macros/               sibling proc-macro crate
   Cargo.toml          proc-macro = true
-  src/lib.rs          #[proc_macro] signal_channel + MUST IMPLEMENT block
+  src/lib.rs          #[proc_macro] signal_channel
   src/parse.rs        syn parser for channel declaration
   src/model.rs        ChannelSpec, StreamBlockSpec, VariantSpecs
   src/validate.rs     semantic checks + span-pointed diagnostics
   src/emit.rs         quote! output
-  README.md           MUST IMPLEMENT note + redesign plan
+  README.md           macro grammar and validation witnesses
 ```
 
 ## See Also
@@ -235,5 +235,3 @@ macros/               sibling proc-macro crate (transitional state —
   for contract crates that build on this kernel.
 - `/home/li/primary/skills/rust-discipline.md` — workspace
   Rust-side conventions this crate follows.
-- `/home/li/primary/reports/designer/238-signal-architecture-redirection-contract-local-verbs.md`
-- `/home/li/primary/reports/designer/239-signal-architecture-migration-plan.md`

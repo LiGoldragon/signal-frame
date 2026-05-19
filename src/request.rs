@@ -1,9 +1,8 @@
 //! `Request<Payload>` — one or more contract operations carried in a frame.
 //!
-//! Under the contract-local-verb architecture (see
-//! `primary/reports/designer/238` and `/239`), the universal
-//! `SignalVerb` tag has been removed. Each [`crate::Operation`] carries
-//! only its payload; the payload's record head names the
+//! Under the contract-local-verb architecture, the universal
+//! `SignalVerb` tag has been removed. Each [`crate::Operation`]
+//! carries only its payload; the payload's record head names the
 //! contract-local verb.
 //!
 //! `RequestPayload` is now a marker trait. Channel-specific universal
@@ -36,7 +35,7 @@ pub struct Request<Payload> {
 /// [`Request::from_payload`] convenience that wraps a payload into a
 /// length-1 `Request`.
 pub trait RequestPayload: Sized {
-    /// Default single-op convenience: payload becomes a length-1
+    /// Default single-operation convenience: payload becomes a length-1
     /// [`Request`] via this method.
     fn into_request(self) -> Request<Self> {
         Request::from_payload(self)
