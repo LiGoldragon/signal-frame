@@ -244,6 +244,12 @@ impl Parse for ObservableBlockSpec {
         let body;
         braced!(body in input);
 
+        if !body.peek(keyword::filter) {
+            return Err(syn::Error::new(
+                span_token.span,
+                "observable block requires `filter <FilterType>;` as its first declaration",
+            ));
+        }
         body.parse::<keyword::filter>()?;
         let filter = body.parse::<Ident>()?;
         body.parse::<Token![;]>()?;
