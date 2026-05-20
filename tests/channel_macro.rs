@@ -348,8 +348,6 @@ signal_channel! {
         Recorded(LedgerAcknowledgement),
     }
     observable {
-        open Watch(LedgerObserverFilter);
-        close Unwatch;
         filter LedgerObserverFilter;
         operation_event OperationReceived;
         effect_event SemaEffectEmitted;
@@ -369,8 +367,6 @@ signal_channel! {
         Observed(LedgerAcknowledgement),
     }
     observable {
-        open Watch(LedgerObserverFilter);
-        close Unwatch;
         filter LedgerObserverFilter;
         operation_event OperationReceived;
         effect_event SemaEffectEmitted;
@@ -398,35 +394,42 @@ impl LedgerObserverFilterMatch for LedgerObserverFilter {
 }
 
 #[test]
-fn observable_allows_domain_observe_operation_when_watch_is_open_verb() {
+fn observable_allows_domain_observe_operation_alongside_macro_mandated_tap() {
+    // The macro mandates Tap/Untap for the observable surface, so a
+    // domain `Observe(...)` operation never collides with the
+    // observability open verb (per /246 §2).
     let observe = DomainObserveOperation::Observe(Selection {
         name: "recent".to_string(),
     });
     assert_eq!(observe.kind(), DomainObserveOperationKind::Observe);
     assert_eq!(observe.opened_stream(), None);
 
-    let watch = DomainObserveOperation::Watch(LedgerObserverFilter::All);
-    assert_eq!(watch.kind(), DomainObserveOperationKind::Watch);
+    let tap = DomainObserveOperation::Tap(LedgerObserverFilter::All);
+    assert_eq!(tap.kind(), DomainObserveOperationKind::Tap);
     assert_eq!(
-        watch.opened_stream(),
+        tap.opened_stream(),
         Some(DomainObserveStreamKind::ObserverStream)
     );
 }
 
 #[test]
-fn observable_block_injects_contract_authored_open_and_close_operations() {
-    let watch = LedgerOperation::Watch(LedgerObserverFilter::All);
-    assert_eq!(watch.kind(), LedgerOperationKind::Watch);
+fn observable_block_injects_macro_mandated_tap_and_untap_operations() {
+    // Per /246 §2: when `observable { ... }` is declared the macro
+    // injects the fixed `Tap(<Filter>)` / `Untap(<Token>)` operations
+    // so `persona-introspect` sees a uniform vocabulary across every
+    // observable channel.
+    let tap = LedgerOperation::Tap(LedgerObserverFilter::All);
+    assert_eq!(tap.kind(), LedgerOperationKind::Tap);
     assert_eq!(
-        watch.opened_stream(),
+        tap.opened_stream(),
         Some(LedgerStreamKind::ObserverStream)
     );
 
     let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(42));
-    let unwatch = LedgerOperation::Unwatch(token);
-    assert_eq!(unwatch.kind(), LedgerOperationKind::Unwatch);
+    let untap = LedgerOperation::Untap(token);
+    assert_eq!(untap.kind(), LedgerOperationKind::Untap);
     assert_eq!(
-        unwatch.closed_stream(),
+        untap.closed_stream(),
         Some(LedgerStreamKind::ObserverStream)
     );
 }
@@ -453,23 +456,23 @@ fn observable_block_injects_reply_variant_with_freshly_minted_token() {
 }
 
 #[test]
-fn observable_round_trips_open_and_close_through_nota() {
-    let watch_request = LedgerOperation::Watch(LedgerObserverFilter::OnlyOperations).into_request();
-    let watch_text = encode_to_text(&watch_request);
-    assert_eq!(watch_text, "(Watch (OnlyOperations))");
+fn observable_round_trips_tap_and_untap_through_nota() {
+    let tap_request = LedgerOperation::Tap(LedgerObserverFilter::OnlyOperations).into_request();
+    let tap_text = encode_to_text(&tap_request);
+    assert_eq!(tap_text, "(Tap (OnlyOperations))");
 
-    let mut decoder = nota_codec::Decoder::new(&watch_text);
-    let decoded = Request::<LedgerOperation>::decode(&mut decoder).expect("decode watch");
-    assert_eq!(decoded, watch_request);
+    let mut decoder = nota_codec::Decoder::new(&tap_text);
+    let decoded = Request::<LedgerOperation>::decode(&mut decoder).expect("decode tap");
+    assert_eq!(decoded, tap_request);
 
     let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(9));
-    let unwatch_request = LedgerOperation::Unwatch(token).into_request();
-    let unwatch_text = encode_to_text(&unwatch_request);
-    assert_eq!(unwatch_text, "(Unwatch (ObserverSubscriptionToken 9))");
+    let untap_request = LedgerOperation::Untap(token).into_request();
+    let untap_text = encode_to_text(&untap_request);
+    assert_eq!(untap_text, "(Untap (ObserverSubscriptionToken 9))");
 
-    let mut decoder = nota_codec::Decoder::new(&unwatch_text);
-    let decoded_unwatch = Request::<LedgerOperation>::decode(&mut decoder).expect("decode unwatch");
-    assert_eq!(decoded_unwatch, unwatch_request);
+    let mut decoder = nota_codec::Decoder::new(&untap_text);
+    let decoded_untap = Request::<LedgerOperation>::decode(&mut decoder).expect("decode untap");
+    assert_eq!(decoded_untap, untap_request);
 }
 
 #[test]
@@ -544,6 +547,111 @@ fn observable_observer_set_routes_events_to_matching_observers() {
         after_unregister.push(token);
     });
     assert_eq!(after_unregister, vec![all_token]);
+}
+
+// /246 §4: `filter default;` makes the macro emit a closed-enum
+// `<Channel>ObserverFilter` with `All` / `OperationsOnly` /
+// `EffectsOnly` variants and the matching `FilterMatch` impl.
+// Contracts whose subscribers need richer predicates use
+// `filter <CustomType>;` and write the impl themselves.
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct AuditOperationReceived {
+    label: String,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct AuditSemaEffectEmitted {
+    label: String,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct AuditProbe {
+    target: String,
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct AuditProbed {
+    accepted: bool,
+}
+
+signal_channel! {
+    channel Audit {
+        operation Probe(AuditProbe),
+    }
+    reply AuditReply {
+        Probed(AuditProbed),
+    }
+    observable {
+        filter default;
+        operation_event AuditOperationReceived;
+        effect_event AuditSemaEffectEmitted;
+    }
+}
+
+#[test]
+fn observable_filter_default_generates_closed_enum_filter_with_three_variants() {
+    // The macro generated `AuditObserverFilter` with `All`,
+    // `OperationsOnly`, `EffectsOnly` — no custom impl was needed.
+    let all = AuditObserverFilter::All;
+    let ops_only = AuditObserverFilter::OperationsOnly;
+    let effects_only = AuditObserverFilter::EffectsOnly;
+
+    let op_event = AuditOperationReceived { label: "probe".into() };
+    let effect_event = AuditSemaEffectEmitted { label: "Assert".into() };
+
+    assert!(all.matches_operation_received(&op_event));
+    assert!(all.matches_effect_emitted(&effect_event));
+
+    assert!(ops_only.matches_operation_received(&op_event));
+    assert!(!ops_only.matches_effect_emitted(&effect_event));
+
+    assert!(!effects_only.matches_operation_received(&op_event));
+    assert!(effects_only.matches_effect_emitted(&effect_event));
+}
+
+#[test]
+fn observable_filter_default_wire_round_trips_through_tap_request() {
+    // The macro-generated `AuditObserverFilter` rides the wire on the
+    // injected `Tap(AuditObserverFilter)` operation. Round-trip its
+    // three variants through the request encoder.
+    for filter in [
+        AuditObserverFilter::All,
+        AuditObserverFilter::OperationsOnly,
+        AuditObserverFilter::EffectsOnly,
+    ] {
+        let tap = AuditOperation::Tap(filter).into_request();
+        let text = encode_to_text(&tap);
+
+        let mut decoder = nota_codec::Decoder::new(&text);
+        let decoded = Request::<AuditOperation>::decode(&mut decoder)
+            .expect("default filter round-trips through Tap request");
+        assert_eq!(decoded, tap);
+    }
+}
+
+#[test]
+fn observable_filter_default_routes_through_observer_set() {
+    // The macro-generated observer set uses the macro-generated
+    // FilterMatch impl when fanning events out.
+    let mut observer_set = AuditObserverSet::new();
+    let all_token = observer_set.register(AuditObserverFilter::All);
+    let ops_only_token = observer_set.register(AuditObserverFilter::OperationsOnly);
+    let effects_only_token = observer_set.register(AuditObserverFilter::EffectsOnly);
+
+    let op_event = AuditOperationReceived { label: "probe".into() };
+    let mut op_recipients: Vec<AuditObserverSubscriptionToken> = Vec::new();
+    observer_set.publish_operation_received(&op_event, |token, _event| {
+        op_recipients.push(token);
+    });
+    assert_eq!(op_recipients, vec![all_token, ops_only_token]);
+
+    let effect_event = AuditSemaEffectEmitted { label: "Assert".into() };
+    let mut effect_recipients: Vec<AuditObserverSubscriptionToken> = Vec::new();
+    observer_set.publish_effect_emitted(&effect_event, |token, _event| {
+        effect_recipients.push(token);
+    });
+    assert_eq!(effect_recipients, vec![all_token, effects_only_token]);
 }
 
 #[test]

@@ -1,5 +1,5 @@
 error: observable block requires `operation_event <Type>;` after the `filter` line — the event record published before lowering
-  --> tests/ui/channel_macro/observable_missing_events.rs:14:5
+  --> tests/ui/channel_macro/observable_missing_events.rs:18:5
    |
-14 |     observable {
+18 |     observable {
    |     ^^^^^^^^^^

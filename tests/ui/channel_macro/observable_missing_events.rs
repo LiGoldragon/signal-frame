@@ -4,6 +4,10 @@ pub struct LedgerFilter;
 pub struct Note;
 pub struct Acknowledgement;
 
+// The observable block must declare both `operation_event` and
+// `effect_event`; omitting either is a compile error. (The macro
+// emits `publish_operation_received` and `publish_effect_emitted`
+// over these two event roles.)
 signal_channel! {
     channel Ledger {
         operation Record(Note),
@@ -12,8 +16,6 @@ signal_channel! {
         Recorded(Acknowledgement),
     }
     observable {
-        open Watch(LedgerFilter);
-        close Unwatch;
         filter LedgerFilter;
     }
 }

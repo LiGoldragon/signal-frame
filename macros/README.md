@@ -43,9 +43,10 @@ enum, NOTA codecs) without any verb-tagging machinery:
 ## Optional `observable` block
 
 A channel can opt into an observer-subscription surface by declaring
-an `observable` block. When present the macro injects two
-contract-author-named operations, an `ObserverStream` whose token type
-is auto-generated, a reply variant
+an `observable` block. When present the macro injects the
+standardized `Tap(<Filter>) opens ObserverStream` /
+`Untap(<Token>)` operations (mandatory, no author override), an
+`ObserverStream` whose token type is auto-generated, a reply variant
 `ObserverSubscriptionOpened`, and a runtime `<Channel>ObserverSet`
 with `publish_*` methods the daemon's executor calls.
 
@@ -57,20 +58,34 @@ signal_channel! {
     }
     reply SpiritReply { … }
     observable {
-        open Watch(ObserverFilter);
-        close Unwatch;
-        filter ObserverFilter;
+        filter default;
         operation_event OperationReceived;
         effect_event SemaEffectEmitted;
     }
 }
 ```
 
-The `filter`, `operation_event`, and `effect_event` idents name types
-the contract crate declares. The macro emits a
-`<Channel>ObserverFilterMatch` trait the contract author implements on
-the filter type; the role-named `matches_operation_received` and
-`matches_effect_emitted` methods route deliveries.
+The observability verbs `Tap` / `Untap` are macro-mandated per
+`reports/designer/246-v4-bundled-fix-deep-design-with-examples.md` §2
+so `persona-introspect` sees a uniform vocabulary across every
+observable channel. A contract that legitimately wants `Tap` (or
+`Untap`) as a domain verb renames its domain verb — the
+observability verbs are not negotiable.
+
+The `filter` declaration takes either a contract-author-named type
+(`filter <Type>;`, in which case the contract crate writes the
+`<Channel>ObserverFilterMatch` impl) or the macro-generated default
+(`filter default;`), which produces a closed-enum filter with
+`All` / `OperationsOnly` / `EffectsOnly` variants and the matching
+trait impl. Use `filter default;` when role-based filtering suffices;
+use `filter <Type>;` when subscribers need richer predicates.
+
+The `operation_event` and `effect_event` idents name event record
+types the contract crate declares. They map to the two fixed
+publication moments: `matches_operation_received` /
+`publish_operation_received` (before lowering) and
+`matches_effect_emitted` / `publish_effect_emitted` (after atomic
+commit).
 
 Per-event names are workspace-uniform vocabulary
 (`OperationReceived`, `SemaEffectEmitted`) so cross-component
@@ -86,22 +101,23 @@ filters and routes, the executor / daemon dispatches the event onto
 the matching observers' subscription streams.
 
 The observable block is opt-in: channels without it produce no
-observer surface and remain backward-compatible with the previous
-shape.
+observer surface. (Persona components are expected to declare it;
+small leaf utilities may omit it.)
 
 ## Validation witnesses
 
 - `tests/channel_macro.rs` proves a positive non-streaming channel,
   a streaming channel, generated kind methods, frame aliases, NOTA
-  round trips, and the observable surface: contract-authored open /
-  close encoding, stream witnesses, reply variant round-trips, and
-  the observer-set's filter-routing behaviour.
+  round trips, and the observable surface: macro-mandated `Tap` /
+  `Untap` injection, stream witnesses, reply variant round-trips,
+  the observer-set's filter-routing behaviour, and the
+  `filter default;` closed-enum generation.
 - `tests/ui/channel_macro/` carries compile-fail witnesses for the
   retired verb-tagged grammar, the retained structural checks
   (duplicate record heads, orphan streams, reverse event belongs
   mismatch, close-token type mismatch), and the observable block's
-  failure modes (missing filter, missing events, operation-name
-  collision, duplicate block).
+  failure modes (missing filter, missing events, domain operation
+  named `Tap` or `Untap`, duplicate block).
 
 The macro's responsibility is unchanged at the level of intent: take
 one channel declaration and emit the typed request/reply/event

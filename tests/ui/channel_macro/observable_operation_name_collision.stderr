@@ -1,5 +1,5 @@
-error: operation `Watch` collides with the `observable` block's `open Watch(...)` declaration; rename the operation or pick a different open verb
-  --> tests/ui/channel_macro/observable_operation_name_collision.rs:12:19
+error: operation `Tap` collides with the macro-mandated observable open verb; rename the domain operation (the observability verbs `Tap`/`Untap` are fixed per /246 §2 for persona-introspect vocabulary uniformity)
+  --> tests/ui/channel_macro/observable_operation_name_collision.rs:16:19
    |
-12 |         operation Watch(Watch),
-   |                   ^^^^^
+16 |         operation Tap(TapPayload),
+   |                   ^^^

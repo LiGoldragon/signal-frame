@@ -15,30 +15,23 @@ pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
     Ok(())
 }
 
-/// The observable block injects operations named by the contract
-/// author (`open <Verb>(...)`, `close <Verb>;`), a stream named
-/// `ObserverStream`, a reply variant
-/// `ObserverSubscriptionOpened`, and event variants for the two event
-/// roles. Catch contract collisions early with a pointed diagnostic,
-/// before the generic duplicate-variant check fires on the
-/// macro-expanded output.
+/// The observable block injects the standardized `Tap` / `Untap`
+/// operations (macro-mandated per /246 §2), a stream named
+/// `ObserverStream`, a reply variant `ObserverSubscriptionOpened`,
+/// and event variants for the two event roles. Catch contract
+/// collisions early with a pointed diagnostic, before the generic
+/// duplicate-variant check fires on the macro-expanded output.
+///
+/// Domain contracts that legitimately want a verb named `Tap` or
+/// `Untap` rename their domain verb — the observability verbs are
+/// fixed so `persona-introspect` sees a uniform vocabulary across
+/// every observable channel (per psyche affirmation
+/// 2026-05-20T02:00Z, recorded in `intent/component-shape.nota`).
 fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
     let Some(observable) = &spec.observable else {
         return Ok(());
     };
 
-    if observable.open_verb == observable.close_verb {
-        return Err(Error::new_spanned(
-            &observable.close_verb,
-            format!(
-                "observable open and close verbs must differ; both are `{}`",
-                observable.open_verb,
-            ),
-        ));
-    }
-
-    let open_verb_name = observable.open_verb.to_string();
-    let close_verb_name = observable.close_verb.to_string();
     let operation_event_name = observable.operation_event.to_string();
     let effect_event_name = observable.effect_event.to_string();
 
@@ -69,20 +62,16 @@ fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
 
     for variant in &spec.request.variants {
         let name = variant.variant_name.to_string();
-        if name == open_verb_name {
+        if name == "Tap" {
             return Err(Error::new_spanned(
                 &variant.variant_name,
-                format!(
-                    "operation `{name}` collides with the `observable` block's `open {open_verb_name}(...)` declaration; rename the operation or pick a different open verb",
-                ),
+                "operation `Tap` collides with the macro-mandated observable open verb; rename the domain operation (the observability verbs `Tap`/`Untap` are fixed per /246 §2 for persona-introspect vocabulary uniformity)",
             ));
         }
-        if name == close_verb_name {
+        if name == "Untap" {
             return Err(Error::new_spanned(
                 &variant.variant_name,
-                format!(
-                    "operation `{name}` collides with the `observable` block's `close {close_verb_name};` declaration; rename the operation or pick a different close verb",
-                ),
+                "operation `Untap` collides with the macro-mandated observable close verb; rename the domain operation (the observability verbs `Tap`/`Untap` are fixed per /246 §2 for persona-introspect vocabulary uniformity)",
             ));
         }
     }

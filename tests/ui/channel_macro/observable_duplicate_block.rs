@@ -6,6 +6,8 @@ pub struct Acknowledgement;
 pub struct OperationReceived;
 pub struct SemaEffectEmitted;
 
+// Only one observable block per channel; duplicates are a compile
+// error.
 signal_channel! {
     channel Ledger {
         operation Record(Note),
@@ -14,15 +16,11 @@ signal_channel! {
         Recorded(Acknowledgement),
     }
     observable {
-        open Watch(LedgerFilter);
-        close Unwatch;
         filter LedgerFilter;
         operation_event OperationReceived;
         effect_event SemaEffectEmitted;
     }
     observable {
-        open Watch(LedgerFilter);
-        close Unwatch;
         filter LedgerFilter;
         operation_event OperationReceived;
         effect_event SemaEffectEmitted;

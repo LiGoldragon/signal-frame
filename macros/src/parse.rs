@@ -5,8 +5,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Ident, Result, Token, Type, braced};
 
 use crate::model::{
-    ChannelSpec, EventBlockSpec, EventVariantSpec, ObservableBlockSpec, ReplyBlockSpec,
-    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
+    ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec,
+    ReplyBlockSpec, ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
 };
 
 mod keyword {
@@ -19,7 +19,6 @@ mod keyword {
     syn::custom_keyword!(belongs);
     syn::custom_keyword!(token);
     syn::custom_keyword!(opened);
-    syn::custom_keyword!(open);
     syn::custom_keyword!(close);
     syn::custom_keyword!(observable);
     syn::custom_keyword!(filter);
@@ -245,50 +244,24 @@ impl Parse for ObservableBlockSpec {
         let body;
         braced!(body in input);
 
-        // open <Verb>(<FilterType>);
-        if !body.peek(keyword::open) {
-            return Err(syn::Error::new(
-                span_token.span,
-                "observable block requires `open <Verb>(<FilterType>);` as its first declaration",
-            ));
-        }
-        body.parse::<keyword::open>()?;
-        let open_verb = body.parse::<Ident>()?;
-        let open_payload;
-        syn::parenthesized!(open_payload in body);
-        let open_filter = open_payload.parse::<Ident>()?;
-        body.parse::<Token![;]>()?;
-
-        // close <Verb>;
-        if !body.peek(keyword::close) {
-            return Err(syn::Error::new(
-                span_token.span,
-                "observable block requires `close <Verb>;` after the `open` line; the close payload is the macro-generated `<Channel>ObserverSubscriptionToken`",
-            ));
-        }
-        body.parse::<keyword::close>()?;
-        let close_verb = body.parse::<Ident>()?;
-        body.parse::<Token![;]>()?;
-
-        // filter <FilterType>;
+        // filter <FilterType>;  OR  filter default;
+        // Per /246 §2: the open/close verbs are fixed at `Tap` /
+        // `Untap` (macro-mandated for persona-component uniformity),
+        // so the observable block opens with the filter declaration.
         if !body.peek(keyword::filter) {
             return Err(syn::Error::new(
                 span_token.span,
-                "observable block requires `filter <FilterType>;` after the `close` line",
+                "observable block requires `filter <FilterType>;` (or `filter default;` for the macro-generated closed-enum filter) as its first declaration",
             ));
         }
         body.parse::<keyword::filter>()?;
-        let filter = body.parse::<Ident>()?;
+        let filter_token = body.parse::<Ident>()?;
+        let filter = if filter_token == "default" {
+            FilterDecl::Default
+        } else {
+            FilterDecl::Named(filter_token)
+        };
         body.parse::<Token![;]>()?;
-
-        if filter != open_filter {
-            return Err(syn::Error::new(
-                open_filter.span(),
-                format!(
-                    "filter type `{open_filter}` in `open {open_verb}({open_filter})` must match `filter {filter};` declaration",
-                ),
-            ));
-        }
 
         // operation_event <Type>; effect_event <Type>;
         // The order matters because the macro uses them positionally
@@ -315,13 +288,11 @@ impl Parse for ObservableBlockSpec {
 
         if !body.is_empty() {
             return Err(body.error(
-                "observable block accepts exactly two event roles: `operation_event` and `effect_event`",
+                "observable block accepts exactly three declarations: `filter`, `operation_event`, `effect_event`",
             ));
         }
 
         Ok(ObservableBlockSpec {
-            open_verb,
-            close_verb,
             filter,
             operation_event,
             effect_event,

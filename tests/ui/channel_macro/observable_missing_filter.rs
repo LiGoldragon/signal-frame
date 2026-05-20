@@ -1,11 +1,12 @@
 use signal_frame::signal_channel;
 
-pub struct LedgerFilter;
 pub struct Note;
 pub struct Acknowledgement;
 pub struct OperationReceived;
 pub struct SemaEffectEmitted;
 
+// The observable block must open with `filter <Type>;` (or
+// `filter default;`); omitting the filter line is a compile error.
 signal_channel! {
     channel Ledger {
         operation Record(Note),
@@ -14,8 +15,6 @@ signal_channel! {
         Recorded(Acknowledgement),
     }
     observable {
-        open Watch(LedgerFilter);
-        close Unwatch;
         operation_event OperationReceived;
         effect_event SemaEffectEmitted;
     }

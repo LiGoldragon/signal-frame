@@ -9,8 +9,8 @@ use quote::{format_ident, quote};
 use syn::parse_quote;
 
 use crate::model::{
-    ChannelSpec, EventBlockSpec, EventVariantSpec, ObservableBlockSpec, ReplyBlockSpec,
-    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
+    ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec,
+    ReplyBlockSpec, ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
 };
 
 pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
@@ -54,9 +54,9 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
 }
 
 /// Build the effective spec to emit. When `observable` is present,
-/// inject the contract-author-named open/close operations, the
-/// `ObserverStream`, the `ObserverSubscriptionOpened` reply
-/// variant, and the two observable event variants (each `belongs
+/// inject the standardized `Tap` / `Untap` operations (macro-mandated
+/// per /246 §2), the `ObserverStream`, the `ObserverSubscriptionOpened`
+/// reply variant, and the two observable event variants (each `belongs
 /// ObserverStream`). All structural validation has already
 /// accepted the original spec; the augmentation only adds variants
 /// that don't collide with the contract author's own declarations
@@ -72,14 +72,15 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
     let observer_stream_name = format_ident!("ObserverStream");
     let token_type: syn::Type = parse_quote!(#token_type_ident);
     let opened_type: syn::Type = parse_quote!(#opened_type_ident);
-    let filter_type = {
-        let filter_ident = &observable.filter;
-        let filter_type: syn::Type = parse_quote!(#filter_ident);
-        filter_type
-    };
+    let filter_ident = filter_ident_for(spec, observable);
+    let filter_type: syn::Type = parse_quote!(#filter_ident);
 
-    let open_variant_name = observable.open_verb.clone();
-    let close_variant_name = observable.close_verb.clone();
+    // Per /246 §2: observability verbs are fixed at `Tap` / `Untap` so
+    // `persona-introspect` sees uniform vocabulary across every
+    // observable channel. Contracts that want these verbs as domain
+    // verbs rename the domain verb instead.
+    let open_variant_name = format_ident!("Tap");
+    let close_variant_name = format_ident!("Untap");
     // The reply variant's enum-variant name is `ObserverSubscriptionOpened`
     // -- uniform wire vocabulary; the variant payload is the per-channel
     // `<Channel>ObserverSubscriptionOpened` Rust type.
@@ -156,6 +157,17 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         event,
         streams,
         observable: None,
+    }
+}
+
+/// Resolve the filter type identifier for an observable block. For
+/// `filter <Type>;` (named), returns the contract author's type. For
+/// `filter default;`, returns the macro-generated
+/// `<Channel>ObserverFilter` ident.
+fn filter_ident_for(spec: &ChannelSpec, observable: &ObservableBlockSpec) -> syn::Ident {
+    match &observable.filter {
+        FilterDecl::Named(ident) => ident.clone(),
+        FilterDecl::Default => format_ident!("{}ObserverFilter", spec.name),
     }
 }
 
@@ -625,13 +637,24 @@ fn emit_observable_runtime(
     let filter_match_trait_name = format_ident!("{}ObserverFilterMatch", channel);
     let projection_alias_name = format_ident!("{}ObservationProjection", channel);
     let operation_enum_name = &augmented.request.name;
-    let filter_type = &observable.filter;
+    let filter_type = filter_ident_for(augmented, observable);
     let operation_event = &observable.operation_event;
     let effect_event = &observable.effect_event;
+    let default_filter_runtime = match &observable.filter {
+        FilterDecl::Default => Some(emit_default_filter(
+            &filter_type,
+            &filter_match_trait_name,
+            operation_event,
+            effect_event,
+        )),
+        FilterDecl::Named(_) => None,
+    };
 
     quote! {
+        #default_filter_runtime
+
         /// Subscription token issued by the observer set when a
-        /// caller subscribes via the channel's `open` verb. Wraps the
+        /// caller subscribes via the channel's `Tap` verb. Wraps the
         /// frame-layer `SubscriptionTokenInner`; the typed newtype
         /// prevents cross-channel token confusion. The NOTA record
         /// head is the uniform `ObserverSubscriptionToken` -- Rust
@@ -874,6 +897,128 @@ fn emit_observable_runtime(
                     EffectEvent = #effect_event,
                 >
         {
+        }
+    }
+}
+
+/// Emit the macro-generated closed-enum filter when the observable
+/// block declares `filter default;` (per /246 §4). Provides three
+/// preset variants — `All`, `OnlyOperations { kinds }`,
+/// `OnlyEvents { event_kinds }` — and the `<Channel>ObserverFilterMatch`
+/// impl over them. Contracts whose subscribers need richer predicates
+/// declare `filter <CustomType>;` and write their own match impl
+/// instead.
+///
+/// `<Channel>ObserverEventKind` is also emitted: a closed enum with
+/// one variant per declared event role (`OperationReceived`,
+/// `SemaEffectEmitted`). Subscribers compose `OnlyEvents { event_kinds }`
+/// against it.
+fn emit_default_filter(
+    filter_type: &syn::Ident,
+    filter_match_trait_name: &syn::Ident,
+    operation_event: &syn::Ident,
+    effect_event: &syn::Ident,
+) -> TokenStream {
+    // Note: /246 §4 sketches richer variants `OnlyOperations { kinds:
+    // Vec<<Channel>OperationKind> }` plus `OnlyEvents { event_kinds }`.
+    // The mechanically-clean default landed first is role-based only
+    // (operations-vs-effects); per-kind filtering requires extending
+    // the `<Channel>OperationKind` enum with rkyv + NOTA derives so it
+    // can ride the wire, which is a separate refactor. Contracts that
+    // need per-kind filtering today use `filter <CustomType>;` and
+    // write the impl themselves.
+
+    quote! {
+        /// Macro-generated default filter for the channel's observer
+        /// stream (declared via `filter default;` in the `observable`
+        /// block). Variants:
+        ///
+        /// * `All` — admit every event.
+        /// * `OperationsOnly` — admit operation-received events;
+        ///   reject effect-emitted events.
+        /// * `EffectsOnly` — admit effect-emitted events; reject
+        ///   operation-received events.
+        ///
+        /// Contracts whose subscribers need richer predicates (e.g.
+        /// per-operation-kind filtering, payload-value matching)
+        /// declare `filter <CustomType>;` in the `observable` block
+        /// and supply their own `<Channel>ObserverFilterMatch` impl
+        /// over the custom type.
+        #[derive(
+            ::rkyv::Archive,
+            ::rkyv::Serialize,
+            ::rkyv::Deserialize,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+        )]
+        pub enum #filter_type {
+            All,
+            OperationsOnly,
+            EffectsOnly,
+        }
+
+        impl ::nota_codec::NotaEncode for #filter_type {
+            fn encode(
+                &self,
+                encoder: &mut ::nota_codec::Encoder,
+            ) -> ::nota_codec::Result<()> {
+                match self {
+                    Self::All => {
+                        encoder.start_record("All")?;
+                        encoder.end_record()
+                    }
+                    Self::OperationsOnly => {
+                        encoder.start_record("OperationsOnly")?;
+                        encoder.end_record()
+                    }
+                    Self::EffectsOnly => {
+                        encoder.start_record("EffectsOnly")?;
+                        encoder.end_record()
+                    }
+                }
+            }
+        }
+
+        impl ::nota_codec::NotaDecode for #filter_type {
+            fn decode(
+                decoder: &mut ::nota_codec::Decoder<'_>,
+            ) -> ::nota_codec::Result<Self> {
+                let head = decoder.peek_record_head()?;
+                match head.as_str() {
+                    "All" => {
+                        decoder.expect_record_head("All")?;
+                        decoder.expect_record_end()?;
+                        Ok(Self::All)
+                    }
+                    "OperationsOnly" => {
+                        decoder.expect_record_head("OperationsOnly")?;
+                        decoder.expect_record_end()?;
+                        Ok(Self::OperationsOnly)
+                    }
+                    "EffectsOnly" => {
+                        decoder.expect_record_head("EffectsOnly")?;
+                        decoder.expect_record_end()?;
+                        Ok(Self::EffectsOnly)
+                    }
+                    other => Err(::nota_codec::Error::UnknownKindForVerb {
+                        verb: stringify!(#filter_type),
+                        got: other.to_string(),
+                    }),
+                }
+            }
+        }
+
+        impl #filter_match_trait_name for #filter_type {
+            fn matches_operation_received(&self, _event: &#operation_event) -> bool {
+                matches!(self, Self::All | Self::OperationsOnly)
+            }
+
+            fn matches_effect_emitted(&self, _event: &#effect_event) -> bool {
+                matches!(self, Self::All | Self::EffectsOnly)
+            }
         }
     }
 }
