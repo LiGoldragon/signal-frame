@@ -71,10 +71,15 @@ executor lowering, logging, introspection).
   transparent wrapper has been collapsed out.
 - `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
   per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
-  distinguishes `Committed` from `Aborted { failed_at, reason }`.
+  distinguishes `Committed` from `OperationAborted { failed_at,
+  reason }` and `BatchAborted { reason, retry, commit }`.
   `SubReply<ReplyPayload>` is the per-operation typed sum
   (`Ok` / `Invalidated` / `Failed` / `Skipped`) — positionally
   addressed.
+- `BatchErrorClassification` — the frame-level trait that maps a
+  daemon-private executor error into wire-safe batch-abort metadata
+  (`BatchFailureReason`, `RetryClassification`, `CommitStatus`).
+  The typed error itself stays daemon-side.
 - `RequestBuilder<Payload>` — the generic multi-operation constructor with
   `RequestBuilderError::EmptyRequest`.
 - `RequestPayload` — marker trait carrying the `into_request()`
@@ -162,6 +167,9 @@ executor lowering, logging, introspection).
 - `Reply` is a typed sum (`Accepted` vs `Rejected`); pre-execution
   rejection cannot carry per-operation results, and accepted replies
   always do. Illegal states unrepresentable.
+- Engine failures are accepted batch-abort replies, not frame
+  rejections. The wire carries only batch-abort classifications;
+  component-private executor errors do not cross the frame boundary.
 - Per-operation replies are positionally addressed — the index in
   `per_operation` aligns with the originating request's operation
   index. No universal verb tag.
@@ -214,7 +222,8 @@ src/identity.rs       typed Slot<T> + Revision wire identities
 src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<Payload>;
                       Request NOTA codec (single payload + bracketed sequence)
 src/reply.rs          Reply<ReplyPayload> (Accepted / Rejected),
-                      AcceptedOutcome, SubReply, OperationFailureReason
+                      AcceptedOutcome, SubReply, OperationFailureReason,
+                      BatchErrorClassification
 src/exchange.rs       SessionEpoch, ExchangeLane, LaneSequence,
                       ExchangeIdentifier, StreamEventIdentifier,
                       ExchangeMode, ExchangeHandshake

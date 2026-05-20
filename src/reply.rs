@@ -172,6 +172,18 @@ pub enum CommitStatus {
     Partial,
 }
 
+/// Classifies a daemon-side execution error into wire-safe
+/// batch-abort metadata.
+///
+/// The typed error itself stays daemon-side. The frame reply only carries
+/// these three classifications so callers can distinguish retry and commit
+/// uncertainty without depending on the component's private error type.
+pub trait BatchErrorClassification {
+    fn batch_failure_reason(&self) -> BatchFailureReason;
+    fn retry_classification(&self) -> RetryClassification;
+    fn commit_status(&self) -> CommitStatus;
+}
+
 /// Why an operation failed during execution.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum OperationFailureReason {

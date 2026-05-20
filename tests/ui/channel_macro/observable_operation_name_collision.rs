@@ -5,7 +5,7 @@ pub struct TapPayload;
 pub struct Note;
 pub struct Acknowledgement;
 pub struct OperationReceived;
-pub struct SemaEffectEmitted;
+pub struct EffectEmitted;
 
 // Per /246 §2: the observable block injects fixed `Tap` / `Untap`
 // operations. A contract that declares `Tap` (or `Untap`) as a domain
@@ -22,7 +22,7 @@ signal_channel! {
     observable {
         filter LedgerFilter;
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
 }
 

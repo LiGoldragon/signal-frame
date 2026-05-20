@@ -1,11 +1,12 @@
 use nota_codec::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    AcceptedOutcome, BatchFailureReason, CommitStatus, ExchangeFrame, ExchangeFrameBody,
-    ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRejectionReason, HandshakeReply,
-    HandshakeRequest, LaneSequence, NonEmpty, OperationFailureReason, ProtocolVersion, Reply,
-    Request, RequestPayload, RetryClassification, Revision, SessionEpoch, Slot,
-    StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply, SubscriptionTokenInner,
+    AcceptedOutcome, BatchErrorClassification, BatchFailureReason, CommitStatus, ExchangeFrame,
+    ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRejectionReason,
+    HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty, OperationFailureReason,
+    ProtocolVersion, Reply, Request, RequestPayload, RetryClassification, Revision, SessionEpoch,
+    Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply,
+    SubscriptionTokenInner,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,31 @@ struct DomainReply {
 impl DomainReply {
     fn accepted() -> Self {
         Self { accepted: true }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EngineFailure {
+    Unavailable,
+}
+
+impl BatchErrorClassification for EngineFailure {
+    fn batch_failure_reason(&self) -> BatchFailureReason {
+        match self {
+            Self::Unavailable => BatchFailureReason::EngineUnavailable,
+        }
+    }
+
+    fn retry_classification(&self) -> RetryClassification {
+        match self {
+            Self::Unavailable => RetryClassification::Retryable,
+        }
+    }
+
+    fn commit_status(&self) -> CommitStatus {
+        match self {
+            Self::Unavailable => CommitStatus::Unknown,
+        }
     }
 }
 
@@ -235,6 +261,21 @@ fn batch_aborted_reply_carries_batch_reason_and_per_operation_subreplies() {
         }
         Reply::Rejected { .. } => panic!("expected accepted reply"),
     }
+}
+
+#[test]
+fn batch_error_classification_projects_wire_safe_metadata() {
+    let failure = EngineFailure::Unavailable;
+
+    assert_eq!(
+        failure.batch_failure_reason(),
+        BatchFailureReason::EngineUnavailable
+    );
+    assert_eq!(
+        failure.retry_classification(),
+        RetryClassification::Retryable
+    );
+    assert_eq!(failure.commit_status(), CommitStatus::Unknown);
 }
 
 #[test]

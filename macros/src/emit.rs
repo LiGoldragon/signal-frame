@@ -880,7 +880,7 @@ fn emit_observable_runtime(
         ///
         /// The `Effect` associated type is intentionally left free:
         /// the executor's bridge constrains it to its own execution-fact
-        /// type (e.g. `SemaEffect`) when composing the bridge.
+        /// type when composing the bridge.
         pub trait #projection_alias_name:
             ::signal_frame::ObservationProjection<
                 Operation = #operation_enum_name,
@@ -911,7 +911,7 @@ fn emit_observable_runtime(
 ///
 /// `<Channel>ObserverEventKind` is also emitted: a closed enum with
 /// one variant per declared event role (`OperationReceived`,
-/// `SemaEffectEmitted`). Subscribers compose `OnlyEvents { event_kinds }`
+/// `EffectEmitted`). Subscribers compose `OnlyEvents { event_kinds }`
 /// against it.
 fn emit_default_filter(
     filter_type: &syn::Ident,

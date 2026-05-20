@@ -4,7 +4,7 @@ pub struct LedgerFilter;
 pub struct Note;
 pub struct Acknowledgement;
 pub struct OperationReceived;
-pub struct SemaEffectEmitted;
+pub struct EffectEmitted;
 
 // Only one observable block per channel; duplicates are a compile
 // error.
@@ -18,12 +18,12 @@ signal_channel! {
     observable {
         filter LedgerFilter;
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
     observable {
         filter LedgerFilter;
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
 }
 

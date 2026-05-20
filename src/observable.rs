@@ -84,7 +84,7 @@ pub trait ObservableSet {
 ///
 /// `Operation` is the contract's operation enum (e.g.
 /// `LedgerOperation`); `Effect` is the executor's execution-fact
-/// type (e.g. `signal_executor::SemaEffect`), kept generic so this
+/// type (e.g. a component-local command effect), kept generic so this
 /// trait does not depend on signal-executor's Sema types. The
 /// daemon's projection impl typically constrains the associated types
 /// via the macro-generated `<Channel>ObservationProjection` trait
@@ -98,7 +98,7 @@ pub trait ObservationProjection {
     type Operation;
 
     /// Execution-fact effect type. Bridge implementations constrain
-    /// this to the executor's `SemaEffect` at the use site.
+    /// this to the executor's component-local effect at the use site.
     type Effect;
 
     /// Record type for the channel's `operation_event` declaration.

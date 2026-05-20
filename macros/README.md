@@ -60,7 +60,7 @@ signal_channel! {
     observable {
         filter default;
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
 }
 ```
@@ -88,7 +88,7 @@ publication moments: `matches_operation_received` /
 commit).
 
 Per-event names are workspace-uniform vocabulary
-(`OperationReceived`, `SemaEffectEmitted`) so cross-component
+(`OperationReceived`, `EffectEmitted`) so cross-component
 observers — persona-introspect, debug tooling — subscribe to the
 same record-head language across every observable channel. The
 Rust-side types are channel-prefixed (`<Channel>ObserverSubscriptionToken`,

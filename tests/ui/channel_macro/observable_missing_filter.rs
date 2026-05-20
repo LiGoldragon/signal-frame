@@ -3,7 +3,7 @@ use signal_frame::signal_channel;
 pub struct Note;
 pub struct Acknowledgement;
 pub struct OperationReceived;
-pub struct SemaEffectEmitted;
+pub struct EffectEmitted;
 
 // The observable block must open with `filter <Type>;` (or
 // `filter default;`); omitting the filter line is a compile error.
@@ -16,7 +16,7 @@ signal_channel! {
     }
     observable {
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
 }
 

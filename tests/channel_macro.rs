@@ -336,7 +336,7 @@ pub struct OperationReceived {
 }
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
-pub struct SemaEffectEmitted {
+pub struct EffectEmitted {
     effect_label: String,
 }
 
@@ -350,7 +350,7 @@ signal_channel! {
     observable {
         filter LedgerObserverFilter;
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
 }
 
@@ -369,7 +369,7 @@ signal_channel! {
     observable {
         filter LedgerObserverFilter;
         operation_event OperationReceived;
-        effect_event SemaEffectEmitted;
+        effect_event EffectEmitted;
     }
 }
 
@@ -378,7 +378,7 @@ impl DomainObserveObserverFilterMatch for LedgerObserverFilter {
         matches!(self, Self::All | Self::OnlyOperations)
     }
 
-    fn matches_effect_emitted(&self, _event: &SemaEffectEmitted) -> bool {
+    fn matches_effect_emitted(&self, _event: &EffectEmitted) -> bool {
         matches!(self, Self::All | Self::OnlyEffects)
     }
 }
@@ -388,7 +388,7 @@ impl LedgerObserverFilterMatch for LedgerObserverFilter {
         matches!(self, Self::All | Self::OnlyOperations)
     }
 
-    fn matches_effect_emitted(&self, _event: &SemaEffectEmitted) -> bool {
+    fn matches_effect_emitted(&self, _event: &EffectEmitted) -> bool {
         matches!(self, Self::All | Self::OnlyEffects)
     }
 }
@@ -438,7 +438,7 @@ fn observable_block_injects_observer_stream_and_event_classes() {
     });
     assert_eq!(received.stream_kind(), LedgerStreamKind::ObserverStream);
 
-    let emitted = LedgerEvent::SemaEffectEmitted(SemaEffectEmitted {
+    let emitted = LedgerEvent::EffectEmitted(EffectEmitted {
         effect_label: "Assert".to_string(),
     });
     assert_eq!(emitted.stream_kind(), LedgerStreamKind::ObserverStream);
@@ -526,7 +526,7 @@ fn observable_observer_set_routes_events_to_matching_observers() {
     });
     assert_eq!(op_recipients, vec![all_token, ops_only_token]);
 
-    let effect_event = SemaEffectEmitted {
+    let effect_event = EffectEmitted {
         effect_label: "Assert".to_string(),
     };
     let mut effect_recipients: Vec<LedgerObserverSubscriptionToken> = Vec::new();
@@ -558,7 +558,7 @@ pub struct AuditOperationReceived {
 }
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
-pub struct AuditSemaEffectEmitted {
+pub struct AuditEffectEmitted {
     label: String,
 }
 
@@ -582,7 +582,7 @@ signal_channel! {
     observable {
         filter default;
         operation_event AuditOperationReceived;
-        effect_event AuditSemaEffectEmitted;
+        effect_event AuditEffectEmitted;
     }
 }
 
@@ -597,7 +597,7 @@ fn observable_filter_default_generates_closed_enum_filter_with_three_variants() 
     let op_event = AuditOperationReceived {
         label: "probe".into(),
     };
-    let effect_event = AuditSemaEffectEmitted {
+    let effect_event = AuditEffectEmitted {
         label: "Assert".into(),
     };
 
@@ -649,7 +649,7 @@ fn observable_filter_default_routes_through_observer_set() {
     });
     assert_eq!(op_recipients, vec![all_token, ops_only_token]);
 
-    let effect_event = AuditSemaEffectEmitted {
+    let effect_event = AuditEffectEmitted {
         label: "Assert".into(),
     };
     let mut effect_recipients: Vec<AuditObserverSubscriptionToken> = Vec::new();
@@ -666,7 +666,7 @@ fn observable_streaming_frame_alias_carries_observer_events() {
         ExchangeLane::Acceptor,
         LaneSequence::first(),
     );
-    let event = LedgerEvent::SemaEffectEmitted(SemaEffectEmitted {
+    let event = LedgerEvent::EffectEmitted(EffectEmitted {
         effect_label: "Assert".to_string(),
     });
     let frame = LedgerFrame::new(StreamingFrameBody::SubscriptionEvent {

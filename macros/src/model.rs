@@ -81,7 +81,7 @@ pub(crate) struct ObservableBlockSpec {
     /// Exactly one per observable block.
     pub(crate) operation_event: Ident,
     /// Contract-author-defined event record type that names the
-    /// `SemaEffectEmitted` publication moment (executor post-commit).
+    /// `EffectEmitted` publication moment (executor post-commit).
     /// Exactly one per observable block.
     pub(crate) effect_event: Ident,
 }
