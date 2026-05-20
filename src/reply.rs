@@ -13,9 +13,12 @@
 //!
 //! Contract-domain rejection is a per-operation
 //! `SubReply::Failed { detail: Some(<contract reply>) }` inside
-//! `Reply::Accepted { outcome: AcceptedOutcome::Aborted, ... }`, not
-//! a kernel-level `Reply::Rejected`. The kernel rejection surface is
-//! reserved for true frame-level or receiver-internal failures.
+//! `Reply::Accepted { outcome: AcceptedOutcome::OperationAborted, ... }`,
+//! not a kernel-level `Reply::Rejected`. Engine commit rejection is also
+//! accepted at the frame boundary, but its outcome is
+//! `AcceptedOutcome::BatchAborted` and the typed engine cause stays
+//! daemon-side. The kernel rejection surface is reserved for true
+//! frame-level failures.
 //!
 //! The `OperationFailureReason` taxonomy therefore names operation
 //! abort causes that still have per-operation reply structure.
@@ -32,19 +35,17 @@ use crate::non_empty::NonEmpty;
 /// illegal states unrepresentable.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Reply<ReplyPayload> {
-    /// Request was accepted for execution. Per-operation results follow.
-    /// `outcome` distinguishes all-committed from aborted-at-N.
+    /// Request was accepted at the frame boundary. Per-operation results
+    /// follow. `outcome` distinguishes all-committed from operation-aborted
+    /// and batch-aborted shapes.
     Accepted {
         outcome: AcceptedOutcome,
         per_operation: NonEmpty<SubReply<ReplyPayload>>,
     },
-    /// Request was rejected before any operation began (true frame /
-    /// kernel failure: decode error, malformed shape, daemon-internal
-    /// pre-execution failure, version skew). No per-operation results
-    /// because no operation ran. Domain-level rejections by the daemon
-    /// never appear here -- they ride as
-    /// `Reply::Accepted { outcome: Aborted, per_operation: [..., Failed
-    /// { detail: Some(contract_reply) }, ...] }`.
+    /// Request was rejected before the receiver accepted it at the frame
+    /// boundary. No per-operation results because the request never became
+    /// an execution candidate. Domain-level rejections and engine commit
+    /// failures never appear here.
     Rejected { reason: RequestRejectionReason },
 }
 
@@ -57,16 +58,25 @@ impl<ReplyPayload> Reply<ReplyPayload> {
         }
     }
 
-    /// Build an aborted reply (a contract-domain rejection or engine
-    /// rejection that surfaces as per-operation `Failed`/`Invalidated`/
-    /// `Skipped`).
-    pub fn aborted(
+    /// Build an operation-aborted reply caused by one domain operation.
+    pub fn operation_aborted(
         failed_at: usize,
         reason: OperationFailureReason,
         per_operation: NonEmpty<SubReply<ReplyPayload>>,
     ) -> Self {
         Self::Accepted {
-            outcome: AcceptedOutcome::Aborted { failed_at, reason },
+            outcome: AcceptedOutcome::OperationAborted { failed_at, reason },
+            per_operation,
+        }
+    }
+
+    /// Build a batch-aborted reply caused by request-wide engine failure.
+    pub fn batch_aborted(
+        reason: BatchFailureReason,
+        per_operation: NonEmpty<SubReply<ReplyPayload>>,
+    ) -> Self {
+        Self::Accepted {
+            outcome: AcceptedOutcome::BatchAborted { reason },
             per_operation,
         }
     }
@@ -78,19 +88,23 @@ impl<ReplyPayload> Reply<ReplyPayload> {
     }
 }
 
-/// Discriminates a fully committed reply from an aborted one.
+/// Discriminates committed, operation-aborted, and batch-aborted accepted
+/// replies.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum AcceptedOutcome {
     /// Every operation in the request committed.
     Committed,
-    /// An operation at `failed_at` failed; the request aborted.
-    Aborted {
+    /// One operation failed during lowering or domain execution; the request
+    /// aborted before commit.
+    OperationAborted {
         failed_at: usize,
         reason: OperationFailureReason,
     },
+    /// The engine rejected the request as a batch. No operation committed.
+    BatchAborted { reason: BatchFailureReason },
 }
 
-/// Why a request was rejected before any operation ran. Frame-layer
+/// Why a request was rejected before frame-boundary acceptance. Frame-layer
 /// rkyv decode failures are protocol errors (close + log), not typed
 /// rejections -- they have no `ExchangeIdentifier` to address.
 ///
@@ -100,12 +114,19 @@ pub enum AcceptedOutcome {
 /// `Internal`.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum RequestRejectionReason {
-    /// Receiver-internal error before any operation ran. Also covers
-    /// engine-level infrastructure failure (atomic commit returned a
-    /// typed error; the typed cause stays daemon-side, the wire reply
-    /// is kernel-shaped).
+    /// Receiver-internal failure before accepting the request as an execution
+    /// candidate.
     #[error("receiver-internal pre-execution or infrastructure failure")]
     Internal,
+}
+
+/// Why a whole accepted batch aborted.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum BatchFailureReason {
+    /// The daemon's execution engine rejected atomic commit. The typed cause
+    /// stays daemon-side.
+    #[error("execution engine rejected the batch")]
+    EngineRejected,
 }
 
 /// Why an operation failed during execution.
@@ -122,7 +143,7 @@ pub enum OperationFailureReason {
 /// reader needs, so illegal combinations (Ok with no payload, Skipped
 /// with payload) are unrepresentable.
 ///
-/// Per-op replies are positionally addressed -- the index in the
+/// Per-operation replies are positionally addressed -- the index in the
 /// `per_operation` [`NonEmpty`] aligns with the originating request's
 /// operation index. No universal verb tag is carried.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -139,7 +160,7 @@ pub enum SubReply<ReplyPayload> {
     /// never reached the engine.
     Invalidated,
     /// Operation was attempted and failed; this is the cause of the abort.
-    /// Exactly one per [`AcceptedOutcome::Aborted`] reply, at
+    /// Exactly one per [`AcceptedOutcome::OperationAborted`] reply, at
     /// `failed_at`. `detail` carries the typed contract reply for
     /// [`OperationFailureReason::DomainRejection`].
     Failed {

@@ -1,11 +1,11 @@
 use nota_codec::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    AcceptedOutcome, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane,
-    FrameError, HandshakeRejectionReason, HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty,
-    OperationFailureReason, ProtocolVersion, Reply, Request, RequestPayload, Revision,
-    SessionEpoch, Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply,
-    SubscriptionTokenInner,
+    AcceptedOutcome, BatchFailureReason, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier,
+    ExchangeLane, FrameError, HandshakeRejectionReason, HandshakeReply, HandshakeRequest,
+    LaneSequence, NonEmpty, OperationFailureReason, ProtocolVersion, Reply, Request,
+    RequestPayload, Revision, SessionEpoch, Slot, StreamEventIdentifier, StreamingFrame,
+    StreamingFrameBody, SubReply, SubscriptionTokenInner,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -165,7 +165,7 @@ fn reply_frame_round_trips_with_exchange_identifier() {
 }
 
 #[test]
-fn aborted_reply_carries_failed_at_and_per_operation_subreplies() {
+fn operation_aborted_reply_carries_failed_at_and_per_operation_subreplies() {
     let per_operation = NonEmpty::from_head_and_tail(
         SubReply::<DomainReply>::Invalidated,
         vec![
@@ -176,8 +176,11 @@ fn aborted_reply_carries_failed_at_and_per_operation_subreplies() {
             SubReply::Skipped,
         ],
     );
-    let reply =
-        Reply::<DomainReply>::aborted(1, OperationFailureReason::DomainRejection, per_operation);
+    let reply = Reply::<DomainReply>::operation_aborted(
+        1,
+        OperationFailureReason::DomainRejection,
+        per_operation,
+    );
 
     match &reply {
         Reply::Accepted {
@@ -186,12 +189,43 @@ fn aborted_reply_carries_failed_at_and_per_operation_subreplies() {
         } => {
             assert!(matches!(
                 outcome,
-                AcceptedOutcome::Aborted {
+                AcceptedOutcome::OperationAborted {
                     failed_at: 1,
                     reason: OperationFailureReason::DomainRejection,
                 }
             ));
             assert_eq!(per_operation.len(), 3);
+        }
+        Reply::Rejected { .. } => panic!("expected accepted reply"),
+    }
+}
+
+#[test]
+fn batch_aborted_reply_carries_batch_reason_and_per_operation_subreplies() {
+    let per_operation = NonEmpty::from_head_and_tail(
+        SubReply::<DomainReply>::Invalidated,
+        vec![SubReply::<DomainReply>::Invalidated],
+    );
+    let reply =
+        Reply::<DomainReply>::batch_aborted(BatchFailureReason::EngineRejected, per_operation);
+
+    match &reply {
+        Reply::Accepted {
+            outcome,
+            per_operation,
+        } => {
+            assert!(matches!(
+                outcome,
+                AcceptedOutcome::BatchAborted {
+                    reason: BatchFailureReason::EngineRejected,
+                }
+            ));
+            assert_eq!(per_operation.len(), 2);
+            assert!(
+                per_operation
+                    .iter()
+                    .all(|reply| matches!(reply, SubReply::Invalidated)),
+            );
         }
         Reply::Rejected { .. } => panic!("expected accepted reply"),
     }
