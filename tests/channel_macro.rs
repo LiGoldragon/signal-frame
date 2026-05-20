@@ -254,9 +254,9 @@ fn macro_streaming_frame_alias_round_trips() {
 
 #[test]
 fn macro_generated_reply_works_with_positioned_subreply() {
-    let reply = signal_frame::Reply::completed(NonEmpty::single(SubReply::Ok {
-        payload: MessageReply::Accepted(Receipt { accepted: true }),
-    }));
+    let reply = signal_frame::Reply::committed(NonEmpty::single(SubReply::Ok(
+        MessageReply::Accepted(Receipt { accepted: true }),
+    )));
 
     match reply {
         signal_frame::Reply::Accepted { per_operation, .. } => {

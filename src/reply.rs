@@ -7,9 +7,22 @@
 //!
 //! Under the contract-local-verb architecture, per-operation replies no longer
 //! carry a universal `SignalVerb` tag. The per-operation reply is
-//! positionally addressed — its index in the `per_operation`
+//! positionally addressed -- its index in the `per_operation`
 //! [`NonEmpty`] matches the index in the originating request's
 //! operation sequence.
+//!
+//! Per the /246 bundled fix: contract-domain rejection is a per-operation
+//! `SubReply::Failed { detail: Some(<contract reply>) }` inside
+//! `Reply::Accepted { outcome: AcceptedOutcome::Aborted, ... }`, NOT a
+//! kernel-level `Reply::Rejected`. The kernel rejection surface narrows
+//! to true frame-level failures (parse error, version skew, daemon-internal
+//! pre-execution failure).
+//!
+//! The `OperationFailureReason` taxonomy is therefore narrowed to two
+//! shapes: `DomainRejection` (the daemon's lowering returned a contract
+//! reply variant for "no, this operation is not allowed") and
+//! `EngineRejection` (the Sema engine returned an infrastructure error;
+//! its typed cause stays daemon-side, the wire reply is kernel-shaped).
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
@@ -27,20 +40,28 @@ pub enum Reply<ReplyPayload> {
         outcome: AcceptedOutcome,
         per_operation: NonEmpty<SubReply<ReplyPayload>>,
     },
-    /// Request was rejected before any op began (pre-flight rule
-    /// violation: decode error, malformed shape, daemon-specific
-    /// pre-execution policy). No per-operation results because no operation ran.
+    /// Request was rejected before any operation began (true frame /
+    /// kernel failure: decode error, malformed shape, daemon-internal
+    /// pre-execution failure, version skew). No per-operation results
+    /// because no operation ran. Domain-level rejections by the daemon
+    /// never appear here -- they ride as
+    /// `Reply::Accepted { outcome: Aborted, per_operation: [..., Failed
+    /// { detail: Some(contract_reply) }, ...] }`.
     Rejected { reason: RequestRejectionReason },
 }
 
 impl<ReplyPayload> Reply<ReplyPayload> {
-    pub fn completed(per_operation: NonEmpty<SubReply<ReplyPayload>>) -> Self {
+    /// Build a fully committed reply.
+    pub fn committed(per_operation: NonEmpty<SubReply<ReplyPayload>>) -> Self {
         Self::Accepted {
-            outcome: AcceptedOutcome::Completed,
+            outcome: AcceptedOutcome::Committed,
             per_operation,
         }
     }
 
+    /// Build an aborted reply (a contract-domain rejection or engine
+    /// rejection that surfaces as per-operation `Failed`/`Invalidated`/
+    /// `Skipped`).
     pub fn aborted(
         failed_at: usize,
         reason: OperationFailureReason,
@@ -52,15 +73,18 @@ impl<ReplyPayload> Reply<ReplyPayload> {
         }
     }
 
+    /// Build a true kernel rejection. Reserved for frame-level failures;
+    /// see [`Reply::Rejected`] for the discipline.
     pub fn rejected(reason: RequestRejectionReason) -> Self {
         Self::Rejected { reason }
     }
 }
 
+/// Discriminates a fully committed reply from an aborted one.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum AcceptedOutcome {
-    /// Every operation completed/committed in its own mode.
-    Completed,
+    /// Every operation in the request committed.
+    Committed,
     /// An operation at `failed_at` failed; the request aborted.
     Aborted {
         failed_at: usize,
@@ -70,51 +94,76 @@ pub enum AcceptedOutcome {
 
 /// Why a request was rejected before any operation ran. Frame-layer
 /// rkyv decode failures are protocol errors (close + log), not typed
-/// rejections — they have no `ExchangeIdentifier` to address.
+/// rejections -- they have no `ExchangeIdentifier` to address.
 ///
 /// Under the contract-local-verb architecture the former universal
 /// rejection reasons (verb/payload mismatch, Subscribe-out-of-position)
-/// no longer apply. Daemon-specific pre-execution policies surface as
-/// `Internal` or as channel-defined reply variants.
+/// no longer apply. Daemon-internal pre-execution policies surface as
+/// `Internal`.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum RequestRejectionReason {
-    /// Receiver-internal error before any op ran.
-    #[error("receiver-internal pre-execution error")]
+    /// Receiver-internal error before any operation ran. Also covers
+    /// engine-level infrastructure failure (atomic commit returned a
+    /// typed error; the typed cause stays daemon-side, the wire reply
+    /// is kernel-shaped).
+    #[error("receiver-internal pre-execution or infrastructure failure")]
     Internal,
 }
 
 /// Why an operation failed during execution.
+///
+/// Narrowed by the /246 bundled fix to exactly two cases:
+///
+/// * [`Self::DomainRejection`] -- the daemon's
+///   [`Lowering`](crate::reply) returned a contract reply variant for
+///   "operation not permitted under the contract's domain rules." The
+///   typed contract reply rides in
+///   `SubReply::Failed { detail: Some(reply) }`.
+/// * [`Self::EngineRejection`] -- the Sema engine returned an
+///   infrastructure error (storage failure, lock contention, etc.).
+///   The typed error stays daemon-side; the wire reply identifies
+///   the engine-failure path without a contract-domain detail.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum OperationFailureReason {
-    /// A pre-condition (expected revision, etc.) was not satisfied.
-    #[error("pre-condition failed")]
-    PreconditionFailed,
-    /// A validation predicate failed at the daemon layer.
-    #[error("validate predicate failed")]
-    ValidationFailed,
-    /// The domain receiver rejected the operation.
-    #[error("domain receiver rejected the operation")]
+    /// The contract's domain rejected the operation. The typed contract
+    /// reply variant lives in
+    /// `SubReply::Failed { detail: Some(reply) }`.
+    #[error("domain rejected the operation")]
     DomainRejection,
+    /// The Sema engine returned an infrastructure error during atomic
+    /// commit. No per-operation contract-reply detail crosses the wire
+    /// (the typed engine error stays daemon-side); the wire reply
+    /// identifies the engine-failure path.
+    #[error("Sema engine rejected the operation")]
+    EngineRejection,
 }
 
 /// Per-operation reply variant. Each variant carries only the fields a
 /// reader needs, so illegal combinations (Ok with no payload, Skipped
 /// with payload) are unrepresentable.
 ///
-/// Per-op replies are positionally addressed — the index in the
+/// Per-op replies are positionally addressed -- the index in the
 /// `per_operation` [`NonEmpty`] aligns with the originating request's
 /// operation index. No universal verb tag is carried.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum SubReply<ReplyPayload> {
     /// Operation ran and committed/completed; only emitted under
-    /// [`AcceptedOutcome::Completed`].
-    Ok { payload: ReplyPayload },
-    /// Operation ran but its result is no longer authoritative because the
-    /// request as a whole aborted.
+    /// [`AcceptedOutcome::Committed`].
+    Ok(ReplyPayload),
+    /// Operation was admitted into the request -- either it ran and its
+    /// result is no longer authoritative because the request as a whole
+    /// aborted, OR it was planned/lowered but invalidated before commit
+    /// because a sibling operation rejected the request. Both shapes
+    /// witness "this operation contributed nothing durable" without
+    /// distinguishing whether its work was executed and rolled back vs
+    /// never reached the engine.
     Invalidated,
     /// Operation was attempted and failed; this is the cause of the abort.
     /// Exactly one per [`AcceptedOutcome::Aborted`] reply, at
-    /// `failed_at`.
+    /// `failed_at`. `detail` carries the typed contract reply for
+    /// [`OperationFailureReason::DomainRejection`]; `None` for
+    /// [`OperationFailureReason::EngineRejection`] (no contract-domain
+    /// detail exists for engine-infrastructure failures).
     Failed {
         reason: OperationFailureReason,
         detail: Option<ReplyPayload>,

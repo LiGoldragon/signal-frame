@@ -145,9 +145,7 @@ fn handshake_rejection_frame_round_trips_at_frame_layer() {
 #[test]
 fn reply_frame_round_trips_with_exchange_identifier() {
     let exchange = fresh_exchange();
-    let reply = Reply::completed(NonEmpty::single(SubReply::Ok {
-        payload: DomainReply::accepted(),
-    }));
+    let reply = Reply::committed(NonEmpty::single(SubReply::Ok(DomainReply::accepted())));
     let frame = ExchangeFrame::<DomainRequest, DomainReply>::new(ExchangeFrameBody::Reply {
         exchange,
         reply: reply.clone(),
@@ -175,14 +173,14 @@ fn aborted_reply_carries_failed_at_and_per_operation_subreplies() {
         SubReply::<DomainReply>::Invalidated,
         vec![
             SubReply::<DomainReply>::Failed {
-                reason: OperationFailureReason::ValidationFailed,
-                detail: None,
+                reason: OperationFailureReason::DomainRejection,
+                detail: Some(DomainReply::accepted()),
             },
             SubReply::Skipped,
         ],
     );
     let reply =
-        Reply::<DomainReply>::aborted(1, OperationFailureReason::ValidationFailed, per_operation);
+        Reply::<DomainReply>::aborted(1, OperationFailureReason::DomainRejection, per_operation);
 
     match &reply {
         Reply::Accepted {
@@ -193,7 +191,7 @@ fn aborted_reply_carries_failed_at_and_per_operation_subreplies() {
                 outcome,
                 AcceptedOutcome::Aborted {
                     failed_at: 1,
-                    reason: OperationFailureReason::ValidationFailed,
+                    reason: OperationFailureReason::DomainRejection,
                 }
             ));
             assert_eq!(per_operation.len(), 3);
