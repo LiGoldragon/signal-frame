@@ -73,10 +73,16 @@ impl<ReplyPayload> Reply<ReplyPayload> {
     /// Build a batch-aborted reply caused by request-wide engine failure.
     pub fn batch_aborted(
         reason: BatchFailureReason,
+        retry: RetryClassification,
+        commit: CommitStatus,
         per_operation: NonEmpty<SubReply<ReplyPayload>>,
     ) -> Self {
         Self::Accepted {
-            outcome: AcceptedOutcome::BatchAborted { reason },
+            outcome: AcceptedOutcome::BatchAborted {
+                reason,
+                retry,
+                commit,
+            },
             per_operation,
         }
     }
@@ -101,7 +107,11 @@ pub enum AcceptedOutcome {
         reason: OperationFailureReason,
     },
     /// The engine rejected the request as a batch. No operation committed.
-    BatchAborted { reason: BatchFailureReason },
+    BatchAborted {
+        reason: BatchFailureReason,
+        retry: RetryClassification,
+        commit: CommitStatus,
+    },
 }
 
 /// Why a request was rejected before frame-boundary acceptance. Frame-layer
@@ -127,6 +137,39 @@ pub enum BatchFailureReason {
     /// stays daemon-side.
     #[error("execution engine rejected the batch")]
     EngineRejected,
+    /// The daemon's execution engine was unavailable before it could decide.
+    #[error("execution engine unavailable")]
+    EngineUnavailable,
+}
+
+/// Whether the caller should retry a batch-aborted request.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum RetryClassification {
+    /// Retrying the same request may succeed.
+    #[error("retryable")]
+    Retryable,
+    /// Retrying the same request is not expected to succeed without
+    /// changing the request or external state.
+    #[error("not retryable")]
+    NotRetryable,
+    /// The receiver cannot honestly classify retry safety.
+    #[error("retry status unknown")]
+    Unknown,
+}
+
+/// What the receiver can say about durable commit state after a
+/// batch-aborted request.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum CommitStatus {
+    /// The batch did not commit any operation.
+    #[error("not committed")]
+    NotCommitted,
+    /// The receiver cannot honestly prove whether anything committed.
+    #[error("commit status unknown")]
+    Unknown,
+    /// Some operation may have committed before the failure surfaced.
+    #[error("partially committed")]
+    Partial,
 }
 
 /// Why an operation failed during execution.

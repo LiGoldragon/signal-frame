@@ -9,8 +9,8 @@ use quote::{format_ident, quote};
 use syn::parse_quote;
 
 use crate::model::{
-    ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec,
-    ReplyBlockSpec, ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
+    ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec, ReplyBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
 };
 
 pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {

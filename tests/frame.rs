@@ -1,11 +1,11 @@
 use nota_codec::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    AcceptedOutcome, BatchFailureReason, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier,
-    ExchangeLane, FrameError, HandshakeRejectionReason, HandshakeReply, HandshakeRequest,
-    LaneSequence, NonEmpty, OperationFailureReason, ProtocolVersion, Reply, Request,
-    RequestPayload, Revision, SessionEpoch, Slot, StreamEventIdentifier, StreamingFrame,
-    StreamingFrameBody, SubReply, SubscriptionTokenInner,
+    AcceptedOutcome, BatchFailureReason, CommitStatus, ExchangeFrame, ExchangeFrameBody,
+    ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRejectionReason, HandshakeReply,
+    HandshakeRequest, LaneSequence, NonEmpty, OperationFailureReason, ProtocolVersion, Reply,
+    Request, RequestPayload, RetryClassification, Revision, SessionEpoch, Slot,
+    StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply, SubscriptionTokenInner,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -206,8 +206,12 @@ fn batch_aborted_reply_carries_batch_reason_and_per_operation_subreplies() {
         SubReply::<DomainReply>::Invalidated,
         vec![SubReply::<DomainReply>::Invalidated],
     );
-    let reply =
-        Reply::<DomainReply>::batch_aborted(BatchFailureReason::EngineRejected, per_operation);
+    let reply = Reply::<DomainReply>::batch_aborted(
+        BatchFailureReason::EngineRejected,
+        RetryClassification::Unknown,
+        CommitStatus::NotCommitted,
+        per_operation,
+    );
 
     match &reply {
         Reply::Accepted {
@@ -218,6 +222,8 @@ fn batch_aborted_reply_carries_batch_reason_and_per_operation_subreplies() {
                 outcome,
                 AcceptedOutcome::BatchAborted {
                     reason: BatchFailureReason::EngineRejected,
+                    retry: RetryClassification::Unknown,
+                    commit: CommitStatus::NotCommitted,
                 }
             ));
             assert_eq!(per_operation.len(), 2);

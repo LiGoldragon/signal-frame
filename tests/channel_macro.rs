@@ -420,10 +420,7 @@ fn observable_block_injects_macro_mandated_tap_and_untap_operations() {
     // observable channel.
     let tap = LedgerOperation::Tap(LedgerObserverFilter::All);
     assert_eq!(tap.kind(), LedgerOperationKind::Tap);
-    assert_eq!(
-        tap.opened_stream(),
-        Some(LedgerStreamKind::ObserverStream)
-    );
+    assert_eq!(tap.opened_stream(), Some(LedgerStreamKind::ObserverStream));
 
     let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(42));
     let untap = LedgerOperation::Untap(token);
@@ -597,8 +594,12 @@ fn observable_filter_default_generates_closed_enum_filter_with_three_variants() 
     let ops_only = AuditObserverFilter::OperationsOnly;
     let effects_only = AuditObserverFilter::EffectsOnly;
 
-    let op_event = AuditOperationReceived { label: "probe".into() };
-    let effect_event = AuditSemaEffectEmitted { label: "Assert".into() };
+    let op_event = AuditOperationReceived {
+        label: "probe".into(),
+    };
+    let effect_event = AuditSemaEffectEmitted {
+        label: "Assert".into(),
+    };
 
     assert!(all.matches_operation_received(&op_event));
     assert!(all.matches_effect_emitted(&effect_event));
@@ -639,14 +640,18 @@ fn observable_filter_default_routes_through_observer_set() {
     let ops_only_token = observer_set.register(AuditObserverFilter::OperationsOnly);
     let effects_only_token = observer_set.register(AuditObserverFilter::EffectsOnly);
 
-    let op_event = AuditOperationReceived { label: "probe".into() };
+    let op_event = AuditOperationReceived {
+        label: "probe".into(),
+    };
     let mut op_recipients: Vec<AuditObserverSubscriptionToken> = Vec::new();
     observer_set.publish_operation_received(&op_event, |token, _event| {
         op_recipients.push(token);
     });
     assert_eq!(op_recipients, vec![all_token, ops_only_token]);
 
-    let effect_event = AuditSemaEffectEmitted { label: "Assert".into() };
+    let effect_event = AuditSemaEffectEmitted {
+        label: "Assert".into(),
+    };
     let mut effect_recipients: Vec<AuditObserverSubscriptionToken> = Vec::new();
     observer_set.publish_effect_emitted(&effect_event, |token, _event| {
         effect_recipients.push(token);

@@ -5,8 +5,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Ident, Result, Token, Type, braced};
 
 use crate::model::{
-    ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec,
-    ReplyBlockSpec, ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
+    ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec, ReplyBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
 };
 
 mod keyword {

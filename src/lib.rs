@@ -36,8 +36,8 @@ pub use identity::{Revision, Slot};
 pub use non_empty::{NonEmpty, NonEmptyError};
 pub use observable::{ObservableSet, ObservationProjection};
 pub use reply::{
-    AcceptedOutcome, BatchFailureReason, OperationFailureReason, Reply, RequestRejectionReason,
-    SubReply,
+    AcceptedOutcome, BatchFailureReason, CommitStatus, OperationFailureReason, Reply,
+    RequestRejectionReason, RetryClassification, SubReply,
 };
 pub use request::{Request, RequestBuilder, RequestBuilderError, RequestPayload};
 pub use subscription::SubscriptionTokenInner;
