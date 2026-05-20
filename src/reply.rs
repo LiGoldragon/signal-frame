@@ -11,18 +11,16 @@
 //! [`NonEmpty`] matches the index in the originating request's
 //! operation sequence.
 //!
-//! Per the /246 bundled fix: contract-domain rejection is a per-operation
+//! Contract-domain rejection is a per-operation
 //! `SubReply::Failed { detail: Some(<contract reply>) }` inside
-//! `Reply::Accepted { outcome: AcceptedOutcome::Aborted, ... }`, NOT a
-//! kernel-level `Reply::Rejected`. The kernel rejection surface narrows
-//! to true frame-level failures (parse error, version skew, daemon-internal
-//! pre-execution failure).
+//! `Reply::Accepted { outcome: AcceptedOutcome::Aborted, ... }`, not
+//! a kernel-level `Reply::Rejected`. The kernel rejection surface is
+//! reserved for true frame-level or receiver-internal failures.
 //!
-//! The `OperationFailureReason` taxonomy is therefore narrowed to two
-//! shapes: `DomainRejection` (the daemon's lowering returned a contract
-//! reply variant for "no, this operation is not allowed") and
-//! `EngineRejection` (the Sema engine returned an infrastructure error;
-//! its typed cause stays daemon-side, the wire reply is kernel-shaped).
+//! The `OperationFailureReason` taxonomy therefore names operation
+//! abort causes that still have per-operation reply structure.
+//! Infrastructure failures from a daemon's execution engine remain
+//! kernel-shaped rejections; their typed cause stays daemon-side.
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
@@ -111,18 +109,6 @@ pub enum RequestRejectionReason {
 }
 
 /// Why an operation failed during execution.
-///
-/// Narrowed by the /246 bundled fix to exactly two cases:
-///
-/// * [`Self::DomainRejection`] -- the daemon's
-///   [`Lowering`](crate::reply) returned a contract reply variant for
-///   "operation not permitted under the contract's domain rules." The
-///   typed contract reply rides in
-///   `SubReply::Failed { detail: Some(reply) }`.
-/// * [`Self::EngineRejection`] -- the Sema engine returned an
-///   infrastructure error (storage failure, lock contention, etc.).
-///   The typed error stays daemon-side; the wire reply identifies
-///   the engine-failure path without a contract-domain detail.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum OperationFailureReason {
     /// The contract's domain rejected the operation. The typed contract
@@ -130,12 +116,6 @@ pub enum OperationFailureReason {
     /// `SubReply::Failed { detail: Some(reply) }`.
     #[error("domain rejected the operation")]
     DomainRejection,
-    /// The Sema engine returned an infrastructure error during atomic
-    /// commit. No per-operation contract-reply detail crosses the wire
-    /// (the typed engine error stays daemon-side); the wire reply
-    /// identifies the engine-failure path.
-    #[error("Sema engine rejected the operation")]
-    EngineRejection,
 }
 
 /// Per-operation reply variant. Each variant carries only the fields a
@@ -161,9 +141,7 @@ pub enum SubReply<ReplyPayload> {
     /// Operation was attempted and failed; this is the cause of the abort.
     /// Exactly one per [`AcceptedOutcome::Aborted`] reply, at
     /// `failed_at`. `detail` carries the typed contract reply for
-    /// [`OperationFailureReason::DomainRejection`]; `None` for
-    /// [`OperationFailureReason::EngineRejection`] (no contract-domain
-    /// detail exists for engine-infrastructure failures).
+    /// [`OperationFailureReason::DomainRejection`].
     Failed {
         reason: OperationFailureReason,
         detail: Option<ReplyPayload>,

@@ -90,7 +90,7 @@ pub(crate) struct ObservableBlockSpec {
 impl ObservableBlockSpec {
     /// Enumerate every event record this block declares. Used by the
     /// emit pass when synthesising the channel's event enum and the
-    /// `<Channel>ObserverStream` block.
+    /// `ObserverStream` block.
     pub(crate) fn event_records(&self) -> [&Ident; 2] {
         [&self.operation_event, &self.effect_event]
     }

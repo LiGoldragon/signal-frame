@@ -121,7 +121,7 @@ fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
             }
         }
     }
-    let auto_stream_name = format!("{}ObserverStream", spec.name);
+    let auto_stream_name = "ObserverStream".to_string();
     for stream in &spec.streams {
         if stream.name == auto_stream_name {
             return Err(Error::new_spanned(

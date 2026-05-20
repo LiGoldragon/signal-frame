@@ -69,7 +69,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
     let channel = &spec.name;
     let token_type_ident = format_ident!("{}ObserverSubscriptionToken", channel);
     let opened_type_ident = format_ident!("{}ObserverSubscriptionOpened", channel);
-    let observer_stream_name = format_ident!("{}ObserverStream", channel);
+    let observer_stream_name = format_ident!("ObserverStream");
     let token_type: syn::Type = parse_quote!(#token_type_ident);
     let opened_type: syn::Type = parse_quote!(#opened_type_ident);
     let filter_type = {

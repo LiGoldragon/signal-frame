@@ -71,7 +71,7 @@ executor lowering, logging, introspection).
   transparent wrapper has been collapsed out.
 - `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
   per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
-  distinguishes `Completed` from `Aborted { failed_at, reason }`.
+  distinguishes `Committed` from `Aborted { failed_at, reason }`.
   `SubReply<ReplyPayload>` is the per-operation typed sum
   (`Ok` / `Invalidated` / `Failed` / `Skipped`) — positionally
   addressed.

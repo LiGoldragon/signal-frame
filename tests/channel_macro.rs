@@ -356,6 +356,37 @@ signal_channel! {
     }
 }
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+pub struct Selection {
+    name: String,
+}
+
+signal_channel! {
+    channel DomainObserve {
+        operation Observe(Selection),
+    }
+    reply DomainObserveReply {
+        Observed(LedgerAcknowledgement),
+    }
+    observable {
+        open Watch(LedgerObserverFilter);
+        close Unwatch;
+        filter LedgerObserverFilter;
+        operation_event OperationReceived;
+        effect_event SemaEffectEmitted;
+    }
+}
+
+impl DomainObserveObserverFilterMatch for LedgerObserverFilter {
+    fn matches_operation_received(&self, _event: &OperationReceived) -> bool {
+        matches!(self, Self::All | Self::OnlyOperations)
+    }
+
+    fn matches_effect_emitted(&self, _event: &SemaEffectEmitted) -> bool {
+        matches!(self, Self::All | Self::OnlyEffects)
+    }
+}
+
 impl LedgerObserverFilterMatch for LedgerObserverFilter {
     fn matches_operation_received(&self, _event: &OperationReceived) -> bool {
         matches!(self, Self::All | Self::OnlyOperations)
@@ -367,12 +398,28 @@ impl LedgerObserverFilterMatch for LedgerObserverFilter {
 }
 
 #[test]
+fn observable_allows_domain_observe_operation_when_watch_is_open_verb() {
+    let observe = DomainObserveOperation::Observe(Selection {
+        name: "recent".to_string(),
+    });
+    assert_eq!(observe.kind(), DomainObserveOperationKind::Observe);
+    assert_eq!(observe.opened_stream(), None);
+
+    let watch = DomainObserveOperation::Watch(LedgerObserverFilter::All);
+    assert_eq!(watch.kind(), DomainObserveOperationKind::Watch);
+    assert_eq!(
+        watch.opened_stream(),
+        Some(DomainObserveStreamKind::ObserverStream)
+    );
+}
+
+#[test]
 fn observable_block_injects_contract_authored_open_and_close_operations() {
     let watch = LedgerOperation::Watch(LedgerObserverFilter::All);
     assert_eq!(watch.kind(), LedgerOperationKind::Watch);
     assert_eq!(
         watch.opened_stream(),
-        Some(LedgerStreamKind::LedgerObserverStream)
+        Some(LedgerStreamKind::ObserverStream)
     );
 
     let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(42));
@@ -380,7 +427,7 @@ fn observable_block_injects_contract_authored_open_and_close_operations() {
     assert_eq!(unwatch.kind(), LedgerOperationKind::Unwatch);
     assert_eq!(
         unwatch.closed_stream(),
-        Some(LedgerStreamKind::LedgerObserverStream)
+        Some(LedgerStreamKind::ObserverStream)
     );
 }
 
@@ -389,18 +436,12 @@ fn observable_block_injects_observer_stream_and_event_classes() {
     let received = LedgerEvent::OperationReceived(OperationReceived {
         operation_kind: "Record".to_string(),
     });
-    assert_eq!(
-        received.stream_kind(),
-        LedgerStreamKind::LedgerObserverStream
-    );
+    assert_eq!(received.stream_kind(), LedgerStreamKind::ObserverStream);
 
     let emitted = LedgerEvent::SemaEffectEmitted(SemaEffectEmitted {
         effect_label: "Assert".to_string(),
     });
-    assert_eq!(
-        emitted.stream_kind(),
-        LedgerStreamKind::LedgerObserverStream
-    );
+    assert_eq!(emitted.stream_kind(), LedgerStreamKind::ObserverStream);
 }
 
 #[test]
