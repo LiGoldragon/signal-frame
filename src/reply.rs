@@ -167,9 +167,6 @@ pub enum CommitStatus {
     /// The receiver cannot honestly prove whether anything committed.
     #[error("commit status unknown")]
     Unknown,
-    /// Some operation may have committed before the failure surfaced.
-    #[error("partially committed")]
-    Partial,
 }
 
 /// Classifies a daemon-side execution error into wire-safe
