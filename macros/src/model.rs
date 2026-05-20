@@ -55,7 +55,7 @@ pub(crate) struct EventVariantSpec {
 
 /// Opt-in observer-subscription declaration. When present, the macro
 /// injects the standardized `Tap(<Filter>) opens ObserverStream` /
-/// `Untap(<Channel>ObserverSubscriptionToken)` operations, an
+/// `Untap(ObserverSubscriptionToken)` operations, an
 /// `ObserverStream` (whose events carry the contract-author-supplied
 /// event payload types), and an observer set / publish surface on
 /// the daemon side.
@@ -74,7 +74,7 @@ pub(crate) struct ObservableBlockSpec {
     /// Filter declaration. Either the macro-generated closed-enum
     /// default (`filter default;`) or a contract-author-named type
     /// (`filter <Type>;`) for which the contract crate provides the
-    /// `<Channel>ObserverFilterMatch` impl.
+    /// `ObserverFilterMatch` impl.
     pub(crate) filter: FilterDecl,
     /// Contract-author-defined event record type that names the
     /// `OperationReceived` publication moment (executor pre-lowering).
@@ -88,12 +88,12 @@ pub(crate) struct ObservableBlockSpec {
 
 /// How the observable block declares its filter type.
 ///
-/// `Default` — macro generates `<Channel>ObserverFilter` as a closed
+/// `Default` — macro generates `ObserverFilter` as a closed
 /// enum (`All | OperationsOnly | EffectsOnly`) plus the matching
-/// `<Channel>ObserverFilterMatch` impl. Per /246 §4.
+/// `ObserverFilterMatch` impl. Per /246 §4.
 ///
 /// `Named` — contract author supplies the filter type and writes the
-/// `<Channel>ObserverFilterMatch` impl against it.
+/// `ObserverFilterMatch` impl against it.
 pub(crate) enum FilterDecl {
     Default,
     Named(Ident),

@@ -16,7 +16,7 @@ signal_channel! {
         operation Query(Query),
         // ...
     }
-    reply LedgerReply {
+    reply Reply {
         Received(ReceivedAcknowledgement),
         Pushed(PushAcknowledgement),
         QueryResult(QueryResult),
@@ -26,13 +26,20 @@ signal_channel! {
 
 The macro emits the same outputs (contract-local operation enum,
 `Frame` alias, `Request` / `RequestBuilder` aliases over the payload
-enum, NOTA codecs) without any verb-tagging machinery:
+enum, reply conversion impls, kind enums, NOTA codecs) without any
+verb-tagging machinery. Emitted names are intentionally unprefixed:
+`Operation`, `Reply`, `Event`, `Frame`, `FrameBody`, `Request`,
+`ReplyEnvelope`, and `RequestBuilder`. If a crate declares multiple
+channels, it puts each invocation in its own Rust module and uses the
+module path as the namespace.
 
 - No `SignalVerb` references — the verb spine is gone at this layer.
 - No `signal_verb()` method on `RequestPayload`.
 - No per-operation kernel wrapper — `Request<Payload>` carries
   `NonEmpty<Payload>` directly. Per-op metadata, if a contract ever
   needs it, goes in the payload type.
+- No hand-written `OperationKind` enum or `From<Payload> for Reply`
+  stack — both are structurally derived from the declaration.
 - No verb-membership check or stream-opening rule tied to a specific
   verb name. `Subscribe`, when a contract uses that word, is just a
   contract-local operation like any other.
@@ -47,8 +54,8 @@ an `observable` block. When present the macro injects the
 standardized `Tap(<Filter>) opens ObserverStream` /
 `Untap(<Token>)` operations (mandatory, no author override), an
 `ObserverStream` whose token type is auto-generated, a reply variant
-`ObserverSubscriptionOpened`, and a runtime `<Channel>ObserverSet`
-with `publish_*` methods the daemon's executor calls.
+`ObserverSubscriptionOpened`, and a runtime `ObserverSet` with
+`publish_*` methods the daemon's executor calls.
 
 ```rust
 signal_channel! {
@@ -56,7 +63,7 @@ signal_channel! {
         operation State(Statement),
         operation Record(Entry),
     }
-    reply SpiritReply { … }
+    reply Reply { … }
     observable {
         filter default;
         operation_event OperationReceived;
@@ -74,7 +81,7 @@ observability verbs are not negotiable.
 
 The `filter` declaration takes either a contract-author-named type
 (`filter <Type>;`, in which case the contract crate writes the
-`<Channel>ObserverFilterMatch` impl) or the macro-generated default
+`ObserverFilterMatch` impl) or the macro-generated default
 (`filter default;`), which produces a closed-enum filter with
 `All` / `OperationsOnly` / `EffectsOnly` variants and the matching
 trait impl. Use `filter default;` when role-based filtering suffices;
@@ -90,13 +97,13 @@ commit).
 Per-event names are workspace-uniform vocabulary
 (`OperationReceived`, `EffectEmitted`) so cross-component
 observers — persona-introspect, debug tooling — subscribe to the
-same record-head language across every observable channel. The
-Rust-side types are channel-prefixed (`<Channel>ObserverSubscriptionToken`,
-`<Channel>ObserverSubscriptionOpened`) so multiple observable
-channels can coexist in the same scope.
+same record-head language across every observable channel. Rust-side
+observable helper names are unprefixed (`ObserverSubscriptionToken`,
+`ObserverSubscriptionOpened`, `ObserverSet`, `ObserverFilterMatch`);
+multiple observable channels coexist by living in separate modules.
 
 The publish methods take a delivery closure
-(`FnMut(<Channel>ObserverSubscriptionToken, &Event)`) — the macro
+(`FnMut(ObserverSubscriptionToken, &Event)`) — the macro
 filters and routes, the executor / daemon dispatches the event onto
 the matching observers' subscription streams.
 

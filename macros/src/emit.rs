@@ -66,9 +66,8 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         return clone_channel_spec(spec);
     };
 
-    let channel = &spec.name;
-    let token_type_ident = format_ident!("{}ObserverSubscriptionToken", channel);
-    let opened_type_ident = format_ident!("{}ObserverSubscriptionOpened", channel);
+    let token_type_ident = format_ident!("ObserverSubscriptionToken");
+    let opened_type_ident = format_ident!("ObserverSubscriptionOpened");
     let observer_stream_name = format_ident!("ObserverStream");
     let token_type: syn::Type = parse_quote!(#token_type_ident);
     let opened_type: syn::Type = parse_quote!(#opened_type_ident);
@@ -83,7 +82,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
     let close_variant_name = format_ident!("Untap");
     // The reply variant's enum-variant name is `ObserverSubscriptionOpened`
     // -- uniform wire vocabulary; the variant payload is the per-channel
-    // `<Channel>ObserverSubscriptionOpened` Rust type.
+    // `ObserverSubscriptionOpened` Rust type.
     let opened_variant_name = format_ident!("ObserverSubscriptionOpened");
 
     let mut request_variants = clone_request_variants(&spec.request.variants);
@@ -124,7 +123,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         .event
         .as_ref()
         .map(|event_block| event_block.name.clone())
-        .unwrap_or_else(|| format_ident!("{}Event", spec.name));
+        .unwrap_or_else(|| format_ident!("Event"));
     let event = Some(EventBlockSpec {
         name: event_block_name,
         variants: event_variants,
@@ -163,11 +162,11 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
 /// Resolve the filter type identifier for an observable block. For
 /// `filter <Type>;` (named), returns the contract author's type. For
 /// `filter default;`, returns the macro-generated
-/// `<Channel>ObserverFilter` ident.
-fn filter_ident_for(spec: &ChannelSpec, observable: &ObservableBlockSpec) -> syn::Ident {
+/// `ObserverFilter` ident.
+fn filter_ident_for(_spec: &ChannelSpec, observable: &ObservableBlockSpec) -> syn::Ident {
     match &observable.filter {
         FilterDecl::Named(ident) => ident.clone(),
-        FilterDecl::Default => format_ident!("{}ObserverFilter", spec.name),
+        FilterDecl::Default => format_ident!("ObserverFilter"),
     }
 }
 
@@ -266,6 +265,17 @@ fn emit_reply_enum(block: &ReplyBlockSpec) -> TokenStream {
         let payload = &v.payload_type;
         quote! { #variant_name(#payload) }
     });
+    let from_impls = block.variants.iter().map(|v| {
+        let variant_name = &v.variant_name;
+        let payload = &v.payload_type;
+        quote! {
+            impl From<#payload> for #name {
+                fn from(payload: #payload) -> Self {
+                    Self::#variant_name(payload)
+                }
+            }
+        }
+    });
     quote! {
         #[derive(
             ::rkyv::Archive,
@@ -279,6 +289,8 @@ fn emit_reply_enum(block: &ReplyBlockSpec) -> TokenStream {
         pub enum #name {
             #( #variants, )*
         }
+
+        #( #from_impls )*
     }
 }
 
@@ -332,7 +344,18 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
     quote! {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(
+            ::rkyv::Archive,
+            ::rkyv::Serialize,
+            ::rkyv::Deserialize,
+            ::nota_codec::NotaEnum,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+        )]
         pub enum #kind_name {
             #( #kind_variants, )*
         }
@@ -359,7 +382,18 @@ fn emit_reply_kind(block: &ReplyBlockSpec) -> TokenStream {
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
     quote! {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(
+            ::rkyv::Archive,
+            ::rkyv::Serialize,
+            ::rkyv::Deserialize,
+            ::nota_codec::NotaEnum,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+        )]
         pub enum #kind_name {
             #( #kind_variants, )*
         }
@@ -386,7 +420,18 @@ fn emit_event_kind(block: &EventBlockSpec) -> TokenStream {
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
     quote! {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(
+            ::rkyv::Archive,
+            ::rkyv::Serialize,
+            ::rkyv::Deserialize,
+            ::nota_codec::NotaEnum,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+        )]
         pub enum #kind_name {
             #( #kind_variants, )*
         }
@@ -402,8 +447,7 @@ fn emit_event_kind(block: &EventBlockSpec) -> TokenStream {
 }
 
 fn emit_stream_kind_and_witnesses(spec: &ChannelSpec) -> TokenStream {
-    let channel = &spec.name;
-    let stream_kind_name = format_ident!("{}StreamKind", channel);
+    let stream_kind_name = format_ident!("StreamKind");
 
     let stream_kind_variants = spec.streams.iter().map(|s| {
         let n = &s.name;
@@ -448,7 +492,18 @@ fn emit_stream_kind_and_witnesses(spec: &ChannelSpec) -> TokenStream {
     };
 
     quote! {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(
+            ::rkyv::Archive,
+            ::rkyv::Serialize,
+            ::rkyv::Deserialize,
+            ::nota_codec::NotaEnum,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+        )]
         pub enum #stream_kind_name {
             #( #stream_kind_variants, )*
         }
@@ -474,14 +529,13 @@ fn emit_stream_kind_and_witnesses(spec: &ChannelSpec) -> TokenStream {
 }
 
 fn emit_frame_aliases(spec: &ChannelSpec) -> TokenStream {
-    let channel = &spec.name;
     let request_name = &spec.request.name;
     let reply_name = &spec.reply.name;
-    let frame_alias = format_ident!("{}Frame", channel);
-    let frame_body_alias = format_ident!("{}FrameBody", channel);
-    let channel_request_alias = format_ident!("{}ChannelRequest", channel);
-    let channel_reply_alias = format_ident!("{}ChannelReply", channel);
-    let channel_builder_alias = format_ident!("{}RequestBuilder", channel);
+    let frame_alias = format_ident!("Frame");
+    let frame_body_alias = format_ident!("FrameBody");
+    let channel_request_alias = format_ident!("Request");
+    let channel_reply_alias = format_ident!("ReplyEnvelope");
+    let channel_builder_alias = format_ident!("RequestBuilder");
 
     if spec.is_streaming() {
         let event_name = &spec
@@ -621,9 +675,9 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
 
 /// Emit the runtime artifacts that turn an observable channel into a
 /// usable observation surface: the subscription token newtype, the
-/// `<Channel>ObserverSubscriptionOpened` reply payload, the
+/// `ObserverSubscriptionOpened` reply payload, the
 /// filter-match trait the contract author implements, the per-channel
-/// `<Channel>ObserverSet`, and the `ObservableSet` impl so observer
+/// `ObserverSet`, and the `ObservableSet` impl so observer
 /// bridge code can compose with the set generically.
 ///
 /// The filter-match and publish methods are role-named
@@ -637,13 +691,12 @@ fn emit_observable_runtime(
     augmented: &ChannelSpec,
     observable: &ObservableBlockSpec,
 ) -> TokenStream {
-    let channel = &augmented.name;
-    let token_type_name = format_ident!("{}ObserverSubscriptionToken", channel);
-    let opened_type_name = format_ident!("{}ObserverSubscriptionOpened", channel);
-    let subscription_struct_name = format_ident!("{}ObserverSubscription", channel);
-    let observer_set_name = format_ident!("{}ObserverSet", channel);
-    let filter_match_trait_name = format_ident!("{}ObserverFilterMatch", channel);
-    let projection_alias_name = format_ident!("{}ObservationProjection", channel);
+    let token_type_name = format_ident!("ObserverSubscriptionToken");
+    let opened_type_name = format_ident!("ObserverSubscriptionOpened");
+    let subscription_struct_name = format_ident!("ObserverSubscription");
+    let observer_set_name = format_ident!("ObserverSet");
+    let filter_match_trait_name = format_ident!("ObserverFilterMatch");
+    let projection_alias_name = format_ident!("ObservationProjection");
     let operation_enum_name = &augmented.request.name;
     let filter_type = filter_ident_for(augmented, observable);
     let operation_event = &observable.operation_event;
@@ -912,12 +965,12 @@ fn emit_observable_runtime(
 /// Emit the macro-generated closed-enum filter when the observable
 /// block declares `filter default;` (per /246 §4). Provides three
 /// preset variants — `All`, `OnlyOperations { kinds }`,
-/// `OnlyEvents { event_kinds }` — and the `<Channel>ObserverFilterMatch`
+/// `OnlyEvents { event_kinds }` — and the `ObserverFilterMatch`
 /// impl over them. Contracts whose subscribers need richer predicates
 /// declare `filter <CustomType>;` and write their own match impl
 /// instead.
 ///
-/// `<Channel>ObserverEventKind` is also emitted: a closed enum with
+/// `EventKind` is also emitted: a closed enum with
 /// one variant per declared event role (`OperationReceived`,
 /// `EffectEmitted`). Subscribers compose `OnlyEvents { event_kinds }`
 /// against it.
@@ -928,10 +981,10 @@ fn emit_default_filter(
     effect_event: &syn::Ident,
 ) -> TokenStream {
     // Note: /246 §4 sketches richer variants `OnlyOperations { kinds:
-    // Vec<<Channel>OperationKind> }` plus `OnlyEvents { event_kinds }`.
+    // Vec<OperationKind> }` plus `OnlyEvents { event_kinds }`.
     // The mechanically-clean default landed first is role-based only
     // (operations-vs-effects); per-kind filtering requires extending
-    // the `<Channel>OperationKind` enum with rkyv + NOTA derives so it
+    // the `OperationKind` enum with rkyv + NOTA derives so it
     // can ride the wire, which is a separate refactor. Contracts that
     // need per-kind filtering today use `filter <CustomType>;` and
     // write the impl themselves.
@@ -950,7 +1003,7 @@ fn emit_default_filter(
         /// Contracts whose subscribers need richer predicates (e.g.
         /// per-operation-kind filtering, payload-value matching)
         /// declare `filter <CustomType>;` in the `observable` block
-        /// and supply their own `<Channel>ObserverFilterMatch` impl
+        /// and supply their own `ObserverFilterMatch` impl
         /// over the custom type.
         #[derive(
             ::rkyv::Archive,

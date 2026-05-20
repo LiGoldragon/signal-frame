@@ -94,13 +94,20 @@ executor lowering, logging, introspection).
   declaring an `observable` block. Under the three-layer model
   affirmed 2026-05-20 (per `/246-v4`), persona components have a
   *mandatory* observable surface and the macro injects standardized
-  `Tap(<FilterType>)` / `Untap(<Channel>ObserverSubscriptionToken)`
+  `Tap(<FilterType>)` / `Untap(ObserverSubscriptionToken)`
   verbs — no author override for persona components. The macro
-  emits the `<Channel>ObserverStream`, the subscription token type,
-  the per-channel `ObserverSet` impl, and (when `filter default;`)
+  emits the `ObserverStream`, the subscription token type, the
+  per-channel `ObserverSet` impl, and (when `filter default;`)
   a closed-enum `ObserverFilter` with matching impl. Non-persona
   utilities may simply omit the `observable` block; if they do
   declare one, the same `Tap`/`Untap` injection applies.
+  Macro-emitted names are unprefixed (`Operation`, `Reply`, `Event`,
+  `Frame`, `FrameBody`, `Request`, `ReplyEnvelope`,
+  `RequestBuilder`, `OperationKind`, `ReplyKind`, `EventKind`);
+  crates with multiple channels use Rust modules for disambiguation.
+  The macro also emits the structurally obvious `From<Payload> for
+  Reply` impls so contract crates do not hand-write conversion
+  stacks.
 - `SignalOperationHeads`, `CommandLineRouteTable`, and
   `signal_cli!` — compile-time request-head metadata and a generated
   working-vs-owner dispatch object for thin component CLIs. The

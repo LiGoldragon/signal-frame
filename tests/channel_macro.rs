@@ -2,8 +2,8 @@ use nota_codec::{NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
-    ObservableSet, Request, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody,
-    SubReply, signal_channel,
+    ObservableSet, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody, SubReply,
+    signal_channel,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -72,32 +72,46 @@ pub struct Inbox {
     count: u64,
 }
 
-signal_channel! {
-    channel Message {
-        operation Submit(Submission),
-        operation Query(InboxQuery),
-    }
-    reply MessageReply {
-        Accepted(Receipt),
-        Inbox(Inbox),
+mod message {
+    use super::*;
+
+    signal_channel! {
+        channel Message {
+            operation Submit(Submission),
+            operation Query(InboxQuery),
+        }
+        reply Reply {
+            Accepted(Receipt),
+            Inbox(Inbox),
+        }
     }
 }
 
-signal_channel! {
-    channel OwnerMessage {
-        operation Configure(Submission),
-        operation Drain(InboxQuery),
-    }
-    reply OwnerMessageReply {
-        Configured(Receipt),
-        Drained(Inbox),
+mod owner_message {
+    use super::*;
+
+    signal_channel! {
+        channel OwnerMessage {
+            operation Configure(Submission),
+            operation Drain(InboxQuery),
+        }
+        reply Reply {
+            Configured(Receipt),
+            Drained(Inbox),
+        }
     }
 }
+
+use message::{
+    Frame as MessageFrame, Operation as MessageOperation, OperationKind as MessageOperationKind,
+    Reply as MessageReply,
+};
+use owner_message::Operation as OwnerMessageOperation;
 
 signal_frame::signal_cli! {
     pub struct MessageCommandLineDispatch {
-        working MessageOperation;
-        owner OwnerMessageOperation;
+        working message::Operation;
+        owner owner_message::Operation;
     }
 }
 
@@ -128,7 +142,7 @@ fn macro_emits_contract_local_operation_enum_without_signal_verb() {
 
 #[test]
 fn macro_request_text_round_trips_through_contract_local_heads() {
-    let request = Request::from_payloads(NonEmpty::from_head_and_tail(
+    let request = signal_frame::Request::from_payloads(NonEmpty::from_head_and_tail(
         MessageOperation::Submit(Submission::new("first")),
         vec![MessageOperation::Query(InboxQuery::new("operator"))],
     ));
@@ -140,7 +154,7 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
     );
 
     let mut decoder = nota_codec::Decoder::new(&text);
-    let decoded = Request::<MessageOperation>::decode(&mut decoder).expect("decode");
+    let decoded = signal_frame::Request::<MessageOperation>::decode(&mut decoder).expect("decode");
     assert_eq!(decoded, request);
 }
 
@@ -224,25 +238,34 @@ pub struct WorkerStarted {
     number: u64,
 }
 
-signal_channel! {
-    channel Terminal {
-        operation Watch(WatchWorker) opens WorkerLifecycle,
-        operation Stop(WorkerToken),
-    }
-    reply TerminalReply {
-        Opened(WorkerOpened),
-        Stopped(WorkerStopped),
-    }
-    event TerminalEvent {
-        Started(WorkerStarted) belongs WorkerLifecycle,
-    }
-    stream WorkerLifecycle {
-        token WorkerToken;
-        opened Opened;
-        event Started;
-        close Stop;
+mod terminal {
+    use super::*;
+
+    signal_channel! {
+        channel Terminal {
+            operation Watch(WatchWorker) opens WorkerLifecycle,
+            operation Stop(WorkerToken),
+        }
+        reply Reply {
+            Opened(WorkerOpened),
+            Stopped(WorkerStopped),
+        }
+        event Event {
+            Started(WorkerStarted) belongs WorkerLifecycle,
+        }
+        stream WorkerLifecycle {
+            token WorkerToken;
+            opened Opened;
+            event Started;
+            close Stop;
+        }
     }
 }
+
+use terminal::{
+    Event as TerminalEvent, Frame as TerminalFrame, Operation as TerminalOperation,
+    Reply as TerminalReply, StreamKind as TerminalStreamKind,
+};
 
 #[test]
 fn macro_stream_witnesses_are_contract_local_not_subscribe_retract_bound() {
@@ -388,17 +411,21 @@ pub struct EffectEmitted {
     effect_label: String,
 }
 
-signal_channel! {
-    channel Ledger {
-        operation Record(LedgerNote),
-    }
-    reply LedgerReply {
-        Recorded(LedgerAcknowledgement),
-    }
-    observable {
-        filter LedgerObserverFilter;
-        operation_event OperationReceived;
-        effect_event EffectEmitted;
+mod ledger {
+    use super::*;
+
+    signal_channel! {
+        channel Ledger {
+            operation Record(LedgerNote),
+        }
+        reply Reply {
+            Recorded(LedgerAcknowledgement),
+        }
+        observable {
+            filter LedgerObserverFilter;
+            operation_event OperationReceived;
+            effect_event EffectEmitted;
+        }
     }
 }
 
@@ -407,21 +434,37 @@ pub struct Selection {
     name: String,
 }
 
-signal_channel! {
-    channel DomainObserve {
-        operation Observe(Selection),
-    }
-    reply DomainObserveReply {
-        Observed(LedgerAcknowledgement),
-    }
-    observable {
-        filter LedgerObserverFilter;
-        operation_event OperationReceived;
-        effect_event EffectEmitted;
+mod domain_observe {
+    use super::*;
+
+    signal_channel! {
+        channel DomainObserve {
+            operation Observe(Selection),
+        }
+        reply Reply {
+            Observed(LedgerAcknowledgement),
+        }
+        observable {
+            filter LedgerObserverFilter;
+            operation_event OperationReceived;
+            effect_event EffectEmitted;
+        }
     }
 }
 
-impl DomainObserveObserverFilterMatch for LedgerObserverFilter {
+use domain_observe::{
+    Operation as DomainObserveOperation, OperationKind as DomainObserveOperationKind,
+    StreamKind as DomainObserveStreamKind,
+};
+use ledger::{
+    Event as LedgerEvent, Frame as LedgerFrame, ObserverSet as LedgerObserverSet,
+    ObserverSubscriptionOpened as LedgerObserverSubscriptionOpened,
+    ObserverSubscriptionToken as LedgerObserverSubscriptionToken, Operation as LedgerOperation,
+    OperationKind as LedgerOperationKind, Reply as LedgerReply, ReplyKind as LedgerReplyKind,
+    StreamKind as LedgerStreamKind,
+};
+
+impl domain_observe::ObserverFilterMatch for LedgerObserverFilter {
     fn matches_operation_received(&self, _event: &OperationReceived) -> bool {
         matches!(self, Self::All | Self::OnlyOperations)
     }
@@ -431,7 +474,7 @@ impl DomainObserveObserverFilterMatch for LedgerObserverFilter {
     }
 }
 
-impl LedgerObserverFilterMatch for LedgerObserverFilter {
+impl ledger::ObserverFilterMatch for LedgerObserverFilter {
     fn matches_operation_received(&self, _event: &OperationReceived) -> bool {
         matches!(self, Self::All | Self::OnlyOperations)
     }
@@ -507,7 +550,8 @@ fn observable_round_trips_tap_and_untap_through_nota() {
     assert_eq!(tap_text, "(Tap (OnlyOperations))");
 
     let mut decoder = nota_codec::Decoder::new(&tap_text);
-    let decoded = Request::<LedgerOperation>::decode(&mut decoder).expect("decode tap");
+    let decoded =
+        signal_frame::Request::<LedgerOperation>::decode(&mut decoder).expect("decode tap");
     assert_eq!(decoded, tap_request);
 
     let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(9));
@@ -516,7 +560,8 @@ fn observable_round_trips_tap_and_untap_through_nota() {
     assert_eq!(untap_text, "(Untap (ObserverSubscriptionToken 9))");
 
     let mut decoder = nota_codec::Decoder::new(&untap_text);
-    let decoded_untap = Request::<LedgerOperation>::decode(&mut decoder).expect("decode untap");
+    let decoded_untap =
+        signal_frame::Request::<LedgerOperation>::decode(&mut decoder).expect("decode untap");
     assert_eq!(decoded_untap, untap_request);
 }
 
@@ -620,19 +665,29 @@ pub struct AuditProbed {
     accepted: bool,
 }
 
-signal_channel! {
-    channel Audit {
-        operation Probe(AuditProbe),
-    }
-    reply AuditReply {
-        Probed(AuditProbed),
-    }
-    observable {
-        filter default;
-        operation_event AuditOperationReceived;
-        effect_event AuditEffectEmitted;
+mod audit {
+    use super::*;
+
+    signal_channel! {
+        channel Audit {
+            operation Probe(AuditProbe),
+        }
+        reply Reply {
+            Probed(AuditProbed),
+        }
+        observable {
+            filter default;
+            operation_event AuditOperationReceived;
+            effect_event AuditEffectEmitted;
+        }
     }
 }
+
+use audit::{
+    ObserverFilter as AuditObserverFilter, ObserverFilterMatch as _,
+    ObserverSet as AuditObserverSet, ObserverSubscriptionToken as AuditObserverSubscriptionToken,
+    Operation as AuditOperation,
+};
 
 #[test]
 fn observable_filter_default_generates_closed_enum_filter_with_three_variants() {
@@ -673,7 +728,7 @@ fn observable_filter_default_wire_round_trips_through_tap_request() {
         let text = encode_to_text(&tap);
 
         let mut decoder = nota_codec::Decoder::new(&text);
-        let decoded = Request::<AuditOperation>::decode(&mut decoder)
+        let decoded = signal_frame::Request::<AuditOperation>::decode(&mut decoder)
             .expect("default filter round-trips through Tap request");
         assert_eq!(decoded, tap);
     }

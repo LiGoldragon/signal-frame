@@ -8,7 +8,7 @@
 //!         operation Query(Query),
 //!         // ...
 //!     }
-//!     reply LedgerReply {
+//!     reply Reply {
 //!         Received(ReceivedAcknowledgement),
 //!         Observed(ObservationAcknowledgement),
 //!         QueryResult(QueryResult),
@@ -23,12 +23,15 @@
 //!
 //! The macro reads one typed channel declaration and emits the
 //! request/reply/event payload enums, kind enums, frame aliases,
-//! stream-relation witnesses, and the NOTA codec on the payload layer.
+//! reply conversion impls, stream-relation witnesses, and the NOTA
+//! codec on the payload layer. Emitted names are clean and
+//! unprefixed; crates with multiple channels use Rust modules for
+//! disambiguation.
 //!
 //! Channels can opt into observation by declaring an `observable`
-//! block; the macro then injects contract-author-named open/close
+//! block; the macro then injects standardized `Tap`/`Untap`
 //! operations, an `ObserverStream`, an `ObserverSubscriptionOpened`
-//! reply variant, and a per-channel `ObserverSet` runtime with
+//! reply variant, and an `ObserverSet` runtime with
 //! `publish_*` methods.
 //! See `macros/README.md` for the observable grammar.
 //!

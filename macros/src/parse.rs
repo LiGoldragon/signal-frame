@@ -34,7 +34,7 @@ impl Parse for ChannelSpec {
         let operation_body;
         braced!(operation_body in input);
 
-        let request_name = Ident::new(&format!("{name}Operation"), name.span());
+        let request_name = Ident::new("Operation", name.span());
         let mut request_variants = Vec::new();
         while !operation_body.is_empty() {
             request_variants.push(operation_body.parse::<RequestVariantSpec>()?);
