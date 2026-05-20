@@ -85,12 +85,17 @@ executor lowering, logging, introspection).
   `signal-frame-macros` proc-macro crate. It declares
   contract-local operation roots directly:
   `operation Submit(Submission)`, not `Assert Submit(Submission)`.
-  A channel may opt into an observation surface by declaring an
-  `observable` block; the contract author names the open and close
-  operations (`open Watch(Filter); close Unwatch;`). The macro then
-  injects those operations, an `ObserverStream`, a subscription token
-  type, and a per-channel `ObserverSet` with role-named publish
-  methods the daemon's executor calls.
+  A channel may opt into a standardized observation surface by
+  declaring an `observable` block. Under the three-layer model
+  affirmed 2026-05-20 (per `/246-v4`), persona components have a
+  *mandatory* observable surface and the macro injects standardized
+  `Tap(<FilterType>)` / `Untap(<Channel>ObserverSubscriptionToken)`
+  verbs — no author override for persona components. The macro
+  emits the `<Channel>ObserverStream`, the subscription token type,
+  the per-channel `ObserverSet` impl, and (when `filter default;`)
+  a closed-enum `ObserverFilter` with matching impl. Non-persona
+  utilities may simply omit the `observable` block; if they do
+  declare one, the same `Tap`/`Untap` injection applies.
 
 ## 2 · Does Not Own
 
