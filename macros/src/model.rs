@@ -54,28 +54,29 @@ pub(crate) struct EventVariantSpec {
 }
 
 /// Opt-in observer-subscription declaration. When present, the macro
-/// injects the standardized `Tap(<Filter>) opens ObserverStream` /
-/// `Untap(<Channel>ObserverSubscriptionToken)` operations, an
+/// injects two contract-author-named operations (open and close), an
 /// `ObserverStream` (whose events carry the contract-author-supplied
-/// event payload types), and an observer set / publish surface on
-/// the daemon side.
+/// event payload types), and an observer set / publish surface on the
+/// daemon side.
 ///
-/// Per /246 §2 (psyche-affirmed 2026-05-20T02:00Z), the observability
-/// open/close verbs are fixed at `Tap` / `Untap` so `persona-introspect`
-/// sees a uniform vocabulary across every observable channel. Domain
-/// contracts that want the verb `Tap` rename their domain verb, not
-/// the observability verb.
-///
-/// The event grammar splits `operation_event <Type>;` from
-/// `effect_event <Type>;` so the macro knows which event record maps
-/// to which publication moment (`publish_operation_received` vs
-/// `publish_effect_emitted`).
+/// The contract author names the open and close verbs so the macro
+/// reserves no globally-shared verb name. The event grammar splits
+/// `operation_event <Type>;` from `effect_event <Type>;` so the macro
+/// knows which event record maps to which publication moment
+/// (`publish_operation_received` vs `publish_effect_emitted`).
 pub(crate) struct ObservableBlockSpec {
-    /// Filter declaration. Either the macro-generated closed-enum
-    /// default (`filter default;`) or a contract-author-named type
-    /// (`filter <Type>;`) for which the contract crate provides the
-    /// `<Channel>ObserverFilterMatch` impl.
-    pub(crate) filter: FilterDecl,
+    /// Contract-author-named verb for opening an observer
+    /// subscription. Becomes `operation <OpenVerb>(<FilterType>)
+    /// opens ObserverStream` in the emitted request enum.
+    pub(crate) open_verb: Ident,
+    /// Contract-author-named verb for closing an observer subscription.
+    /// Becomes `operation <CloseVerb>(<Channel>ObserverSubscriptionToken)`
+    /// in the emitted request enum. The token payload is macro-determined.
+    pub(crate) close_verb: Ident,
+    /// Contract-author-defined filter type. The macro references the
+    /// name; the contract crate declares the type and implements
+    /// `<Channel>ObserverFilterMatch` against it.
+    pub(crate) filter: Ident,
     /// Contract-author-defined event record type that names the
     /// `OperationReceived` publication moment (executor pre-lowering).
     /// Exactly one per observable block.
@@ -84,19 +85,6 @@ pub(crate) struct ObservableBlockSpec {
     /// `SemaEffectEmitted` publication moment (executor post-commit).
     /// Exactly one per observable block.
     pub(crate) effect_event: Ident,
-}
-
-/// How the observable block declares its filter type.
-///
-/// `Default` — macro generates `<Channel>ObserverFilter` as a closed
-/// enum (`All | OnlyOperations { kinds } | OnlyEvents { event_kinds }`)
-/// plus the matching `<Channel>ObserverFilterMatch` impl. Per /246 §4.
-///
-/// `Named` — contract author supplies the filter type and writes the
-/// `<Channel>ObserverFilterMatch` impl against it.
-pub(crate) enum FilterDecl {
-    Default,
-    Named(Ident),
 }
 
 impl ObservableBlockSpec {
