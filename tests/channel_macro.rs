@@ -2,8 +2,8 @@ use nota_codec::{NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
-    Request, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody, SubReply,
-    signal_channel,
+    ObservableSet, Request, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody,
+    SubReply, signal_channel,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -243,10 +243,7 @@ fn macro_streaming_frame_alias_round_trips() {
         } => {
             assert_eq!(decoded_identifier, event_identifier);
             assert_eq!(token, signal_frame::SubscriptionTokenInner::new(5));
-            assert_eq!(
-                event,
-                TerminalEvent::Started(WorkerStarted { number: 5 })
-            );
+            assert_eq!(event, TerminalEvent::Started(WorkerStarted { number: 5 }));
         }
         _ => panic!("expected subscription event frame"),
     }
@@ -351,9 +348,11 @@ signal_channel! {
         Recorded(LedgerAcknowledgement),
     }
     observable {
+        open Watch(LedgerObserverFilter);
+        close Unwatch;
         filter LedgerObserverFilter;
-        event OperationReceived;
-        event SemaEffectEmitted;
+        operation_event OperationReceived;
+        effect_event SemaEffectEmitted;
     }
 }
 
@@ -362,29 +361,26 @@ impl LedgerObserverFilterMatch for LedgerObserverFilter {
         matches!(self, Self::All | Self::OnlyOperations)
     }
 
-    fn matches_sema_effect_emitted(&self, _event: &SemaEffectEmitted) -> bool {
+    fn matches_effect_emitted(&self, _event: &SemaEffectEmitted) -> bool {
         matches!(self, Self::All | Self::OnlyEffects)
     }
 }
 
 #[test]
-fn observable_block_injects_observe_and_unobserve_operations() {
-    let observe =
-        LedgerOperation::Observe(LedgerObserverFilter::All);
-    assert_eq!(observe.kind(), LedgerOperationKind::Observe);
+fn observable_block_injects_contract_authored_open_and_close_operations() {
+    let watch = LedgerOperation::Watch(LedgerObserverFilter::All);
+    assert_eq!(watch.kind(), LedgerOperationKind::Watch);
     assert_eq!(
-        observe.opened_stream(),
-        Some(LedgerStreamKind::ObserverStream)
+        watch.opened_stream(),
+        Some(LedgerStreamKind::LedgerObserverStream)
     );
 
-    let token = LedgerObserverSubscriptionToken::new(
-        signal_frame::SubscriptionTokenInner::new(42),
-    );
-    let unobserve = LedgerOperation::Unobserve(token);
-    assert_eq!(unobserve.kind(), LedgerOperationKind::Unobserve);
+    let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(42));
+    let unwatch = LedgerOperation::Unwatch(token);
+    assert_eq!(unwatch.kind(), LedgerOperationKind::Unwatch);
     assert_eq!(
-        unobserve.closed_stream(),
-        Some(LedgerStreamKind::ObserverStream)
+        unwatch.closed_stream(),
+        Some(LedgerStreamKind::LedgerObserverStream)
     );
 }
 
@@ -395,7 +391,7 @@ fn observable_block_injects_observer_stream_and_event_classes() {
     });
     assert_eq!(
         received.stream_kind(),
-        LedgerStreamKind::ObserverStream
+        LedgerStreamKind::LedgerObserverStream
     );
 
     let emitted = LedgerEvent::SemaEffectEmitted(SemaEffectEmitted {
@@ -403,52 +399,41 @@ fn observable_block_injects_observer_stream_and_event_classes() {
     });
     assert_eq!(
         emitted.stream_kind(),
-        LedgerStreamKind::ObserverStream
+        LedgerStreamKind::LedgerObserverStream
     );
 }
 
 #[test]
 fn observable_block_injects_reply_variant_with_freshly_minted_token() {
-    let token = LedgerObserverSubscriptionToken::new(
-        signal_frame::SubscriptionTokenInner::new(7),
-    );
+    let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(7));
     let opened = LedgerObserverSubscriptionOpened::new(token);
     let reply = LedgerReply::ObserverSubscriptionOpened(opened);
     assert_eq!(reply.kind(), LedgerReplyKind::ObserverSubscriptionOpened);
 }
 
 #[test]
-fn observable_round_trips_observe_and_unobserve_through_nota() {
-    let observe_request =
-        LedgerOperation::Observe(LedgerObserverFilter::OnlyOperations).into_request();
-    let observe_text = encode_to_text(&observe_request);
-    assert_eq!(observe_text, "(Observe (OnlyOperations))");
+fn observable_round_trips_open_and_close_through_nota() {
+    let watch_request = LedgerOperation::Watch(LedgerObserverFilter::OnlyOperations).into_request();
+    let watch_text = encode_to_text(&watch_request);
+    assert_eq!(watch_text, "(Watch (OnlyOperations))");
 
-    let mut decoder = nota_codec::Decoder::new(&observe_text);
-    let decoded = Request::<LedgerOperation>::decode(&mut decoder).expect("decode observe");
-    assert_eq!(decoded, observe_request);
+    let mut decoder = nota_codec::Decoder::new(&watch_text);
+    let decoded = Request::<LedgerOperation>::decode(&mut decoder).expect("decode watch");
+    assert_eq!(decoded, watch_request);
 
-    let token = LedgerObserverSubscriptionToken::new(
-        signal_frame::SubscriptionTokenInner::new(9),
-    );
-    let unobserve_request = LedgerOperation::Unobserve(token).into_request();
-    let unobserve_text = encode_to_text(&unobserve_request);
-    assert_eq!(
-        unobserve_text,
-        "(Unobserve (ObserverSubscriptionToken 9))"
-    );
+    let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(9));
+    let unwatch_request = LedgerOperation::Unwatch(token).into_request();
+    let unwatch_text = encode_to_text(&unwatch_request);
+    assert_eq!(unwatch_text, "(Unwatch (ObserverSubscriptionToken 9))");
 
-    let mut decoder = nota_codec::Decoder::new(&unobserve_text);
-    let decoded_unobserve =
-        Request::<LedgerOperation>::decode(&mut decoder).expect("decode unobserve");
-    assert_eq!(decoded_unobserve, unobserve_request);
+    let mut decoder = nota_codec::Decoder::new(&unwatch_text);
+    let decoded_unwatch = Request::<LedgerOperation>::decode(&mut decoder).expect("decode unwatch");
+    assert_eq!(decoded_unwatch, unwatch_request);
 }
 
 #[test]
 fn observable_round_trips_observer_subscription_opened_reply() {
-    let token = LedgerObserverSubscriptionToken::new(
-        signal_frame::SubscriptionTokenInner::new(3),
-    );
+    let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(3));
     let opened = LedgerObserverSubscriptionOpened::new(token);
     let reply_payload = LedgerReply::ObserverSubscriptionOpened(opened);
 
@@ -504,7 +489,7 @@ fn observable_observer_set_routes_events_to_matching_observers() {
         effect_label: "Assert".to_string(),
     };
     let mut effect_recipients: Vec<LedgerObserverSubscriptionToken> = Vec::new();
-    observer_set.publish_sema_effect_emitted(&effect_event, |token, _event| {
+    observer_set.publish_effect_emitted(&effect_event, |token, _event| {
         effect_recipients.push(token);
     });
     assert_eq!(effect_recipients, vec![all_token, effects_only_token]);
@@ -538,10 +523,8 @@ fn observable_streaming_frame_alias_carries_observer_events() {
 
     let bytes = frame.encode_length_prefixed().expect("encode");
     let decoded =
-        StreamingFrame::<LedgerOperation, LedgerReply, LedgerEvent>::decode_length_prefixed(
-            &bytes,
-        )
-        .expect("decode");
+        StreamingFrame::<LedgerOperation, LedgerReply, LedgerEvent>::decode_length_prefixed(&bytes)
+            .expect("decode");
 
     match decoded.into_body() {
         StreamingFrameBody::SubscriptionEvent {

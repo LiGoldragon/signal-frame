@@ -20,6 +20,7 @@ pub mod exchange;
 pub mod frame;
 pub mod identity;
 pub mod non_empty;
+pub mod observable;
 pub mod reply;
 pub mod request;
 pub mod subscription;
@@ -33,6 +34,7 @@ pub use exchange::{
 pub use frame::{ExchangeFrame, ExchangeFrameBody, StreamingFrame, StreamingFrameBody};
 pub use identity::{Revision, Slot};
 pub use non_empty::{NonEmpty, NonEmptyError};
+pub use observable::{ObservableSet, ObservationProjection};
 pub use reply::{AcceptedOutcome, OperationFailureReason, Reply, RequestRejectionReason, SubReply};
 pub use request::{Request, RequestBuilder, RequestBuilderError, RequestPayload};
 pub use subscription::SubscriptionTokenInner;

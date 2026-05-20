@@ -1,5 +1,5 @@
-error: observable block requires `filter <FilterType>;` as its first declaration
-  --> tests/ui/channel_macro/observable_missing_filter.rs:13:5
+error: observable block requires `filter <FilterType>;` after the `close` line
+  --> tests/ui/channel_macro/observable_missing_filter.rs:16:5
    |
-13 |     observable {
+16 |     observable {
    |     ^^^^^^^^^^

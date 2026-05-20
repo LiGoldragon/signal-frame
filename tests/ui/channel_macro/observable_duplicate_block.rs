@@ -4,6 +4,7 @@ pub struct LedgerFilter;
 pub struct Note;
 pub struct Acknowledgement;
 pub struct OperationReceived;
+pub struct SemaEffectEmitted;
 
 signal_channel! {
     channel Ledger {
@@ -13,12 +14,18 @@ signal_channel! {
         Recorded(Acknowledgement),
     }
     observable {
+        open Watch(LedgerFilter);
+        close Unwatch;
         filter LedgerFilter;
-        event OperationReceived;
+        operation_event OperationReceived;
+        effect_event SemaEffectEmitted;
     }
     observable {
+        open Watch(LedgerFilter);
+        close Unwatch;
         filter LedgerFilter;
-        event OperationReceived;
+        operation_event OperationReceived;
+        effect_event SemaEffectEmitted;
     }
 }
 

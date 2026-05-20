@@ -1,5 +1,5 @@
 error: duplicate `observable` block
-  --> tests/ui/channel_macro/observable_duplicate_block.rs:19:5
+  --> tests/ui/channel_macro/observable_duplicate_block.rs:23:5
    |
-19 |     observable {
+23 |     observable {
    |     ^^^^^^^^^^

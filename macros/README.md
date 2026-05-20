@@ -12,7 +12,7 @@ universal Sema verb appears at this layer.
 signal_channel! {
     channel Ledger {
         operation Receive(HookNotification),
-        operation Observe(Push),
+        operation Push(Push),
         operation Query(Query),
         // ...
     }
@@ -44,8 +44,8 @@ enum, NOTA codecs) without any verb-tagging machinery:
 
 A channel can opt into an observer-subscription surface by declaring
 an `observable` block. When present the macro injects two
-operations (`Observe` / `Unobserve`), an `ObserverStream` whose token
-type is auto-generated, a reply variant
+contract-author-named operations, an `ObserverStream` whose token type
+is auto-generated, a reply variant
 `ObserverSubscriptionOpened`, and a runtime `<Channel>ObserverSet`
 with `publish_*` methods the daemon's executor calls.
 
@@ -57,17 +57,20 @@ signal_channel! {
     }
     reply SpiritReply { … }
     observable {
+        open Watch(ObserverFilter);
+        close Unwatch;
         filter ObserverFilter;
-        event OperationReceived;
-        event SemaEffectEmitted;
+        operation_event OperationReceived;
+        effect_event SemaEffectEmitted;
     }
 }
 ```
 
-The `filter` and each `event` ident names a type the contract crate
-declares. The macro emits a `<Channel>ObserverFilterMatch` trait the
-contract author implements on the filter type — the per-event
-`matches_<event>` method routes deliveries.
+The `filter`, `operation_event`, and `effect_event` idents name types
+the contract crate declares. The macro emits a
+`<Channel>ObserverFilterMatch` trait the contract author implements on
+the filter type; the role-named `matches_operation_received` and
+`matches_effect_emitted` methods route deliveries.
 
 Per-event names are workspace-uniform vocabulary
 (`OperationReceived`, `SemaEffectEmitted`) so cross-component
@@ -90,9 +93,9 @@ shape.
 
 - `tests/channel_macro.rs` proves a positive non-streaming channel,
   a streaming channel, generated kind methods, frame aliases, NOTA
-  round trips, and the observable surface: Observe / Unobserve
-  encoding, stream witnesses, reply variant round-trips, and the
-  observer-set's filter-routing behaviour.
+  round trips, and the observable surface: contract-authored open /
+  close encoding, stream witnesses, reply variant round-trips, and
+  the observer-set's filter-routing behaviour.
 - `tests/ui/channel_macro/` carries compile-fail witnesses for the
   retired verb-tagged grammar, the retained structural checks
   (duplicate record heads, orphan streams, reverse event belongs

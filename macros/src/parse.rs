@@ -19,9 +19,12 @@ mod keyword {
     syn::custom_keyword!(belongs);
     syn::custom_keyword!(token);
     syn::custom_keyword!(opened);
+    syn::custom_keyword!(open);
     syn::custom_keyword!(close);
     syn::custom_keyword!(observable);
     syn::custom_keyword!(filter);
+    syn::custom_keyword!(operation_event);
+    syn::custom_keyword!(effect_event);
 }
 
 impl Parse for ChannelSpec {
@@ -219,9 +222,7 @@ impl Parse for StreamBlockSpec {
             body.parse::<Token![;]>()?;
         }
         if events.is_empty() {
-            return Err(body.error(
-                "stream block requires at least one `event <Variant>;` slot",
-            ));
+            return Err(body.error("stream block requires at least one `event <Variant>;` slot"));
         }
 
         body.parse::<keyword::close>()?;
@@ -244,33 +245,86 @@ impl Parse for ObservableBlockSpec {
         let body;
         braced!(body in input);
 
+        // open <Verb>(<FilterType>);
+        if !body.peek(keyword::open) {
+            return Err(syn::Error::new(
+                span_token.span,
+                "observable block requires `open <Verb>(<FilterType>);` as its first declaration",
+            ));
+        }
+        body.parse::<keyword::open>()?;
+        let open_verb = body.parse::<Ident>()?;
+        let open_payload;
+        syn::parenthesized!(open_payload in body);
+        let open_filter = open_payload.parse::<Ident>()?;
+        body.parse::<Token![;]>()?;
+
+        // close <Verb>;
+        if !body.peek(keyword::close) {
+            return Err(syn::Error::new(
+                span_token.span,
+                "observable block requires `close <Verb>;` after the `open` line; the close payload is the macro-generated `<Channel>ObserverSubscriptionToken`",
+            ));
+        }
+        body.parse::<keyword::close>()?;
+        let close_verb = body.parse::<Ident>()?;
+        body.parse::<Token![;]>()?;
+
+        // filter <FilterType>;
         if !body.peek(keyword::filter) {
             return Err(syn::Error::new(
                 span_token.span,
-                "observable block requires `filter <FilterType>;` as its first declaration",
+                "observable block requires `filter <FilterType>;` after the `close` line",
             ));
         }
         body.parse::<keyword::filter>()?;
         let filter = body.parse::<Ident>()?;
         body.parse::<Token![;]>()?;
 
-        let mut events: Vec<Ident> = Vec::new();
-        while !body.is_empty() {
-            body.parse::<keyword::event>()?;
-            events.push(body.parse::<Ident>()?);
-            body.parse::<Token![;]>()?;
+        if filter != open_filter {
+            return Err(syn::Error::new(
+                open_filter.span(),
+                format!(
+                    "filter type `{open_filter}` in `open {open_verb}({open_filter})` must match `filter {filter};` declaration",
+                ),
+            ));
         }
-        if events.is_empty() {
+
+        // operation_event <Type>; effect_event <Type>;
+        // The order matters because the macro uses them positionally
+        // when wiring publish_operation_received vs publish_effect_emitted.
+        if !body.peek(keyword::operation_event) {
             return Err(syn::Error::new(
                 span_token.span,
-                "observable block requires at least one `event <PayloadType>;` slot",
+                "observable block requires `operation_event <Type>;` after the `filter` line — the event record published before lowering",
+            ));
+        }
+        body.parse::<keyword::operation_event>()?;
+        let operation_event = body.parse::<Ident>()?;
+        body.parse::<Token![;]>()?;
+
+        if !body.peek(keyword::effect_event) {
+            return Err(syn::Error::new(
+                span_token.span,
+                "observable block requires `effect_event <Type>;` after the `operation_event` line — the event record published after atomic commit",
+            ));
+        }
+        body.parse::<keyword::effect_event>()?;
+        let effect_event = body.parse::<Ident>()?;
+        body.parse::<Token![;]>()?;
+
+        if !body.is_empty() {
+            return Err(body.error(
+                "observable block accepts exactly two event roles: `operation_event` and `effect_event`",
             ));
         }
 
         Ok(ObservableBlockSpec {
-            span: Ident::new("observable", span_token.span),
+            open_verb,
+            close_verb,
             filter,
-            events,
+            operation_event,
+            effect_event,
         })
     }
 }

@@ -20,7 +20,7 @@ to the sibling crate `signal-sema`.
 `signal-frame` is domain-free and verb-free. Per-component contract
 crates depend on it and supply their own contract-local operation
 roots in domain-verb form (`Query`, `Submit`, `Configure`,
-`Register`, `Observe`, etc.).
+  `Register`, `Watch`, `Query`, etc.).
 
 ```mermaid
 flowchart TB
@@ -86,10 +86,11 @@ executor lowering, logging, introspection).
   contract-local operation roots directly:
   `operation Submit(Submission)`, not `Assert Submit(Submission)`.
   A channel may opt into an observation surface by declaring an
-  `observable` block; the macro then injects `Observe` / `Unobserve`
-  operations, an `ObserverStream`, a subscription token type, and a
-  per-channel `ObserverSet` with `publish_*` methods the daemon's
-  executor calls.
+  `observable` block; the contract author names the open and close
+  operations (`open Watch(Filter); close Unwatch;`). The macro then
+  injects those operations, an `ObserverStream`, a subscription token
+  type, and a per-channel `ObserverSet` with role-named publish
+  methods the daemon's executor calls.
 
 ## 2 · Does Not Own
 

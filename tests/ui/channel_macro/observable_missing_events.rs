@@ -12,6 +12,8 @@ signal_channel! {
         Recorded(Acknowledgement),
     }
     observable {
+        open Watch(LedgerFilter);
+        close Unwatch;
         filter LedgerFilter;
     }
 }

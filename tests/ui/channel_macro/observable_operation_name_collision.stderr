@@ -1,5 +1,5 @@
-error: operation `Observe` collides with the `observable` block's auto-injected operation
-  --> tests/ui/channel_macro/observable_operation_name_collision.rs:11:19
+error: operation `Watch` collides with the `observable` block's `open Watch(...)` declaration; rename the operation or pick a different open verb
+  --> tests/ui/channel_macro/observable_operation_name_collision.rs:12:19
    |
-11 |         operation Observe(Watch),
-   |                   ^^^^^^^
+12 |         operation Watch(Watch),
+   |                   ^^^^^

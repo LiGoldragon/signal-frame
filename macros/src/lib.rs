@@ -4,7 +4,7 @@
 //! signal_channel! {
 //!     channel Ledger {
 //!         operation Receive(HookNotification),
-//!         operation Observe(Push),
+//!         operation Push(Push),
 //!         operation Query(Query),
 //!         // ...
 //!     }
@@ -26,9 +26,10 @@
 //! stream-relation witnesses, and the NOTA codec on the payload layer.
 //!
 //! Channels can opt into observation by declaring an `observable`
-//! block; the macro then injects `Observe` / `Unobserve` operations,
-//! an `ObserverStream`, an `ObserverSubscriptionOpened` reply variant,
-//! and a per-channel `ObserverSet` runtime with `publish_*` methods.
+//! block; the macro then injects contract-author-named open/close
+//! operations, an `ObserverStream`, an `ObserverSubscriptionOpened`
+//! reply variant, and a per-channel `ObserverSet` runtime with
+//! `publish_*` methods.
 //! See `macros/README.md` for the observable grammar.
 //!
 //! Does not emit actors, sockets, storage, routing, policy closures,

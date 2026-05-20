@@ -54,21 +54,46 @@ pub(crate) struct EventVariantSpec {
 }
 
 /// Opt-in observer-subscription declaration. When present, the macro
-/// injects `Observe` / `Unobserve` operations, an `ObserverStream`
-/// (whose events carry the contract-author-supplied event payload
-/// types), and an observer set / publish surface on the daemon side.
+/// injects two contract-author-named operations (open and close), an
+/// `ObserverStream` (whose events carry the contract-author-supplied
+/// event payload types), and an observer set / publish surface on the
+/// daemon side.
+///
+/// The contract author names the open and close verbs so the macro
+/// reserves no globally-shared verb name. The event grammar splits
+/// `operation_event <Type>;` from `effect_event <Type>;` so the macro
+/// knows which event record maps to which publication moment
+/// (`publish_operation_received` vs `publish_effect_emitted`).
 pub(crate) struct ObservableBlockSpec {
-    /// Span pointer for diagnostics — points at the `observable`
-    /// keyword.
-    pub(crate) span: Ident,
+    /// Contract-author-named verb for opening an observer
+    /// subscription. Becomes `operation <OpenVerb>(<FilterType>)
+    /// opens ObserverStream` in the emitted request enum.
+    pub(crate) open_verb: Ident,
+    /// Contract-author-named verb for closing an observer subscription.
+    /// Becomes `operation <CloseVerb>(<Channel>ObserverSubscriptionToken)`
+    /// in the emitted request enum. The token payload is macro-determined.
+    pub(crate) close_verb: Ident,
     /// Contract-author-defined filter type. The macro references the
     /// name; the contract crate declares the type and implements
-    /// `ObserverFilterMatch` against it.
+    /// `<Channel>ObserverFilterMatch` against it.
     pub(crate) filter: Ident,
-    /// Contract-author-defined event payload types, in declaration
-    /// order. Each becomes a variant of the channel's event enum and
-    /// an event slot on the macro-generated `ObserverStream`.
-    pub(crate) events: Vec<Ident>,
+    /// Contract-author-defined event record type that names the
+    /// `OperationReceived` publication moment (executor pre-lowering).
+    /// Exactly one per observable block.
+    pub(crate) operation_event: Ident,
+    /// Contract-author-defined event record type that names the
+    /// `SemaEffectEmitted` publication moment (executor post-commit).
+    /// Exactly one per observable block.
+    pub(crate) effect_event: Ident,
+}
+
+impl ObservableBlockSpec {
+    /// Enumerate every event record this block declares. Used by the
+    /// emit pass when synthesising the channel's event enum and the
+    /// `<Channel>ObserverStream` block.
+    pub(crate) fn event_records(&self) -> [&Ident; 2] {
+        [&self.operation_event, &self.effect_event]
+    }
 }
 
 impl ChannelSpec {

@@ -3,9 +3,9 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     AcceptedOutcome, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane,
     FrameError, HandshakeRejectionReason, HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty,
-    OperationFailureReason, ProtocolVersion, Reply, Request, RequestPayload,
-    Revision, SessionEpoch, Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody,
-    SubReply, SubscriptionTokenInner,
+    OperationFailureReason, ProtocolVersion, Reply, Request, RequestPayload, Revision,
+    SessionEpoch, Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply,
+    SubscriptionTokenInner,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -94,10 +94,7 @@ fn request_from_payload_wraps_single_payload() {
     let request = Request::from_payload(DomainRequest::new("Node"));
 
     assert_eq!(request.payloads().len(), 1);
-    assert_eq!(
-        request.payloads().head(),
-        &DomainRequest::new("Node")
-    );
+    assert_eq!(request.payloads().head(), &DomainRequest::new("Node"));
 }
 
 #[test]

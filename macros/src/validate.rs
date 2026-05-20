@@ -15,33 +15,53 @@ pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
     Ok(())
 }
 
-/// The observable block injects operations named `Observe` and
-/// `Unobserve`, a stream named `ObserverStream`, a reply variant
-/// `ObserverSubscriptionOpened`, and event variants whose names come
-/// from the observable block's `event <Name>;` lines. Catch contract
-/// collisions early with a pointed diagnostic, before the generic
-/// duplicate-variant check fires on the macro-expanded output.
+/// The observable block injects operations named by the contract
+/// author (`open <Verb>(...)`, `close <Verb>;`), a stream named
+/// `ObserverStream`, a reply variant
+/// `ObserverSubscriptionOpened`, and event variants for the two event
+/// roles. Catch contract collisions early with a pointed diagnostic,
+/// before the generic duplicate-variant check fires on the
+/// macro-expanded output.
 fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
     let Some(observable) = &spec.observable else {
         return Ok(());
     };
 
-    let mut seen_event_names: HashSet<String> = HashSet::new();
-    for event in &observable.events {
-        let event_name = event.to_string();
-        if !seen_event_names.insert(event_name.clone()) {
+    if observable.open_verb == observable.close_verb {
+        return Err(Error::new_spanned(
+            &observable.close_verb,
+            format!(
+                "observable open and close verbs must differ; both are `{}`",
+                observable.open_verb,
+            ),
+        ));
+    }
+
+    let open_verb_name = observable.open_verb.to_string();
+    let close_verb_name = observable.close_verb.to_string();
+    let operation_event_name = observable.operation_event.to_string();
+    let effect_event_name = observable.effect_event.to_string();
+
+    if operation_event_name == effect_event_name {
+        return Err(Error::new_spanned(
+            &observable.effect_event,
+            "observable `operation_event` and `effect_event` must declare distinct event record types",
+        ));
+    }
+    for reserved in ["ObserverSubscriptionToken", "ObserverSubscriptionOpened"] {
+        if operation_event_name == reserved {
             return Err(Error::new_spanned(
-                event,
-                format!("duplicate event `{event_name}` in observable block"),
+                &observable.operation_event,
+                format!(
+                    "observable `operation_event` `{reserved}` collides with a macro-reserved record head"
+                ),
             ));
         }
-        if event_name == "ObserverSubscriptionToken"
-            || event_name == "ObserverSubscriptionOpened"
-        {
+        if effect_event_name == reserved {
             return Err(Error::new_spanned(
-                event,
+                &observable.effect_event,
                 format!(
-                    "observable event `{event_name}` collides with a macro-reserved record head",
+                    "observable `effect_event` `{reserved}` collides with a macro-reserved record head"
                 ),
             ));
         }
@@ -49,11 +69,19 @@ fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
 
     for variant in &spec.request.variants {
         let name = variant.variant_name.to_string();
-        if name == "Observe" || name == "Unobserve" {
+        if name == open_verb_name {
             return Err(Error::new_spanned(
                 &variant.variant_name,
                 format!(
-                    "operation `{name}` collides with the `observable` block's auto-injected operation",
+                    "operation `{name}` collides with the `observable` block's `open {open_verb_name}(...)` declaration; rename the operation or pick a different open verb",
+                ),
+            ));
+        }
+        if name == close_verb_name {
+            return Err(Error::new_spanned(
+                &variant.variant_name,
+                format!(
+                    "operation `{name}` collides with the `observable` block's `close {close_verb_name};` declaration; rename the operation or pick a different close verb",
                 ),
             ));
         }
@@ -67,14 +95,14 @@ fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
         }
     }
     if let Some(event_block) = &spec.event {
-        let observable_events: HashSet<String> = observable
-            .events
+        let observable_event_names: HashSet<String> = observable
+            .event_records()
             .iter()
             .map(|event| event.to_string())
             .collect();
         for variant in &event_block.variants {
             let name = variant.variant_name.to_string();
-            if observable_events.contains(&name) {
+            if observable_event_names.contains(&name) {
                 return Err(Error::new_spanned(
                     &variant.variant_name,
                     format!(
@@ -83,7 +111,7 @@ fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
                 ));
             }
             let payload_head = projected_record_head(&variant.payload_type);
-            if observable_events.contains(&payload_head) {
+            if observable_event_names.contains(&payload_head) {
                 return Err(Error::new_spanned(
                     &variant.variant_name,
                     format!(
@@ -93,11 +121,14 @@ fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
             }
         }
     }
+    let auto_stream_name = format!("{}ObserverStream", spec.name);
     for stream in &spec.streams {
-        if stream.name == "ObserverStream" {
+        if stream.name == auto_stream_name {
             return Err(Error::new_spanned(
                 &stream.name,
-                "stream `ObserverStream` collides with the `observable` block's auto-injected stream",
+                format!(
+                    "stream `{auto_stream_name}` collides with the `observable` block's auto-injected stream",
+                ),
             ));
         }
     }
@@ -238,9 +269,7 @@ fn validate_stream_relations(spec: &ChannelSpec) -> syn::Result<()> {
         if !opened_stream_names.contains(&stream_name) {
             return Err(Error::new_spanned(
                 &stream.name,
-                format!(
-                    "stream `{stream_name}` is orphaned — no request operation opens it",
-                ),
+                format!("stream `{stream_name}` is orphaned — no request operation opens it",),
             ));
         }
     }

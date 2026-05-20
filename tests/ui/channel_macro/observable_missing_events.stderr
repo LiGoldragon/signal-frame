@@ -1,4 +1,4 @@
-error: observable block requires at least one `event <PayloadType>;` slot
+error: observable block requires `operation_event <Type>;` after the `filter` line — the event record published before lowering
   --> tests/ui/channel_macro/observable_missing_events.rs:14:5
    |
 14 |     observable {

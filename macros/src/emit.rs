@@ -4,7 +4,7 @@
 //! `observable` block, also injects observer-subscription operations,
 //! an `ObserverStream`, and the runtime publish surface.
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse_quote;
 
@@ -54,21 +54,22 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
 }
 
 /// Build the effective spec to emit. When `observable` is present,
-/// inject the observer-subscription operations, the `ObserverStream`,
-/// the `ObserverSubscriptionOpened` reply variant, and the observable
-/// event variants (each `belongs ObserverStream`). All structural
-/// validation has already accepted the original spec; the augmentation
-/// only adds variants that don't collide with the contract author's
-/// own declarations (see `validate_observable_does_not_collide`).
+/// inject the contract-author-named open/close operations, the
+/// `ObserverStream`, the `ObserverSubscriptionOpened` reply
+/// variant, and the two observable event variants (each `belongs
+/// ObserverStream`). All structural validation has already
+/// accepted the original spec; the augmentation only adds variants
+/// that don't collide with the contract author's own declarations
+/// (see `validate_observable_does_not_collide`).
 fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
     let Some(observable) = &spec.observable else {
         return clone_channel_spec(spec);
     };
 
-    let span = observable.span.span();
     let channel = &spec.name;
     let token_type_ident = format_ident!("{}ObserverSubscriptionToken", channel);
     let opened_type_ident = format_ident!("{}ObserverSubscriptionOpened", channel);
+    let observer_stream_name = format_ident!("{}ObserverStream", channel);
     let token_type: syn::Type = parse_quote!(#token_type_ident);
     let opened_type: syn::Type = parse_quote!(#opened_type_ident);
     let filter_type = {
@@ -77,22 +78,21 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         filter_type
     };
 
-    let observer_stream_name = ident("ObserverStream", span);
-    let observe_variant_name = ident("Observe", span);
-    let unobserve_variant_name = ident("Unobserve", span);
+    let open_variant_name = observable.open_verb.clone();
+    let close_variant_name = observable.close_verb.clone();
     // The reply variant's enum-variant name is `ObserverSubscriptionOpened`
-    // — uniform wire vocabulary; the variant payload is the per-channel
+    // -- uniform wire vocabulary; the variant payload is the per-channel
     // `<Channel>ObserverSubscriptionOpened` Rust type.
-    let opened_variant_name = ident("ObserverSubscriptionOpened", span);
+    let opened_variant_name = format_ident!("ObserverSubscriptionOpened");
 
     let mut request_variants = clone_request_variants(&spec.request.variants);
     request_variants.push(RequestVariantSpec {
-        variant_name: observe_variant_name.clone(),
+        variant_name: open_variant_name.clone(),
         payload_type: filter_type,
         opens: Some(observer_stream_name.clone()),
     });
     request_variants.push(RequestVariantSpec {
-        variant_name: unobserve_variant_name,
+        variant_name: close_variant_name.clone(),
         payload_type: token_type.clone(),
         opens: None,
     });
@@ -108,7 +108,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         .as_ref()
         .map(|event_block| clone_event_variants(&event_block.variants))
         .unwrap_or_default();
-    for event_name in &observable.events {
+    for event_name in observable.event_records() {
         let event_payload_type: syn::Type = {
             let event_ident = event_name.clone();
             parse_quote!(#event_ident)
@@ -123,19 +123,24 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         .event
         .as_ref()
         .map(|event_block| event_block.name.clone())
-        .unwrap_or_else(|| ident(&format!("{}Event", spec.name), spec.name.span()));
+        .unwrap_or_else(|| format_ident!("{}Event", spec.name));
     let event = Some(EventBlockSpec {
         name: event_block_name,
         variants: event_variants,
     });
 
+    let observable_event_records: Vec<syn::Ident> = observable
+        .event_records()
+        .iter()
+        .map(|event| (*event).clone())
+        .collect();
     let mut streams = clone_streams(&spec.streams);
     streams.push(StreamBlockSpec {
         name: observer_stream_name,
         token: token_type,
         opened: opened_variant_name,
-        events: observable.events.clone(),
-        close: ident("Unobserve", span),
+        events: observable_event_records,
+        close: close_variant_name,
     });
 
     ChannelSpec {
@@ -152,10 +157,6 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         streams,
         observable: None,
     }
-}
-
-fn ident(text: &str, span: Span) -> syn::Ident {
-    syn::Ident::new(text, span)
 }
 
 fn clone_channel_spec(spec: &ChannelSpec) -> ChannelSpec {
@@ -600,9 +601,18 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
 
 /// Emit the runtime artifacts that turn an observable channel into a
 /// usable observation surface: the subscription token newtype, the
-/// `ObserverSubscriptionOpened` reply payload, the filter-match trait
-/// the contract author implements, and the per-channel `ObserverSet`
-/// that the daemon's executor calls `publish_*` on.
+/// `<Channel>ObserverSubscriptionOpened` reply payload, the
+/// filter-match trait the contract author implements, the per-channel
+/// `<Channel>ObserverSet`, and the `ObservableSet` impl so observer
+/// bridge code can compose with the set generically.
+///
+/// The filter-match and publish methods are role-named
+/// (`matches_operation_received` / `matches_effect_emitted` and
+/// `publish_operation_received` / `publish_effect_emitted`) rather
+/// than event-record-name-derived, because the two publication moments
+/// are fixed by the executor's surface while the event record names
+/// are contract-author-supplied. Role-named methods align with the
+/// `ObservableSet` trait, which is what the bridge composes over.
 fn emit_observable_runtime(
     augmented: &ChannelSpec,
     observable: &ObservableBlockSpec,
@@ -613,50 +623,20 @@ fn emit_observable_runtime(
     let subscription_struct_name = format_ident!("{}ObserverSubscription", channel);
     let observer_set_name = format_ident!("{}ObserverSet", channel);
     let filter_match_trait_name = format_ident!("{}ObserverFilterMatch", channel);
+    let projection_alias_name = format_ident!("{}ObservationProjection", channel);
+    let operation_enum_name = &augmented.request.name;
     let filter_type = &observable.filter;
-
-    let event_idents: Vec<&syn::Ident> = observable.events.iter().collect();
-    let trait_methods = event_idents.iter().map(|event| {
-        let method_name = format_ident!("matches_{}", event_snake_case(event));
-        quote! {
-            fn #method_name(&self, event: &#event) -> bool;
-        }
-    });
-
-    let publish_methods = event_idents.iter().map(|event| {
-        let publish_name = format_ident!("publish_{}", event_snake_case(event));
-        let match_method_name = format_ident!("matches_{}", event_snake_case(event));
-        quote! {
-            /// Deliver the event to every subscribed observer whose
-            /// filter accepts it. `deliver` runs once per matching
-            /// observer, in registration order.
-            pub fn #publish_name<DeliverObserver>(
-                &self,
-                event: &#event,
-                mut deliver: DeliverObserver,
-            )
-            where
-                DeliverObserver: FnMut(#token_type_name, &#event),
-            {
-                for subscription in &self.subscriptions {
-                    if <#filter_type as #filter_match_trait_name>::#match_method_name(
-                        &subscription.filter,
-                        event,
-                    ) {
-                        deliver(subscription.token, event);
-                    }
-                }
-            }
-        }
-    });
+    let operation_event = &observable.operation_event;
+    let effect_event = &observable.effect_event;
 
     quote! {
         /// Subscription token issued by the observer set when a
-        /// caller subscribes via `Observe`. Wraps the frame-layer
-        /// `SubscriptionTokenInner`; the typed newtype prevents
-        /// cross-channel token confusion. The NOTA record head is
-        /// the uniform `ObserverSubscriptionToken` — Rust scopes the
-        /// type by channel, the wire vocabulary stays uniform.
+        /// caller subscribes via the channel's `open` verb. Wraps the
+        /// frame-layer `SubscriptionTokenInner`; the typed newtype
+        /// prevents cross-channel token confusion. The NOTA record
+        /// head is the uniform `ObserverSubscriptionToken` -- Rust
+        /// scopes the type by channel, the wire vocabulary stays
+        /// uniform.
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
@@ -702,9 +682,9 @@ fn emit_observable_runtime(
             }
         }
 
-        /// Reply payload returned when an `Observe` call has been
-        /// accepted: carries the freshly minted subscription token so
-        /// the subscriber can address its own `Unobserve` later.
+        /// Reply payload returned when the channel's `open` verb has
+        /// been accepted: carries the freshly minted subscription
+        /// token so the subscriber can address its own `close` later.
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
@@ -751,14 +731,26 @@ fn emit_observable_runtime(
         /// surface but cannot know which subset of events any given
         /// filter accepts. Implement this trait for the contract's
         /// observer filter type to wire that policy.
+        ///
+        /// The two methods correspond to the two fixed publication
+        /// moments the executor surfaces: `matches_operation_received`
+        /// is consulted before lowering; `matches_effect_emitted` is
+        /// consulted after atomic commit.
         pub trait #filter_match_trait_name {
-            #( #trait_methods )*
+            /// Returns true when the filter admits the operation-received
+            /// event (published before lowering).
+            fn matches_operation_received(&self, event: &#operation_event) -> bool;
+            /// Returns true when the filter admits the effect-emitted
+            /// event (published after atomic commit).
+            fn matches_effect_emitted(&self, event: &#effect_event) -> bool;
         }
 
         /// In-memory state of all live observer subscriptions on this
-        /// channel. The executor calls `publish_*` after the relevant
-        /// daemon-side moment; observer subscription / unsubscription
-        /// runs through `register` / `unregister`.
+        /// channel. The executor calls `publish_operation_received`
+        /// after every inbound contract operation and
+        /// `publish_effect_emitted` after every committed Sema effect;
+        /// observer subscription / unsubscription runs through
+        /// `register` / `unregister`.
         pub struct #observer_set_name {
             subscriptions: Vec<#subscription_struct_name>,
             next_token_value: u64,
@@ -811,26 +803,77 @@ fn emit_observable_runtime(
             pub fn is_empty(&self) -> bool {
                 self.subscriptions.is_empty()
             }
+        }
 
-            #( #publish_methods )*
+        impl ::signal_frame::ObservableSet for #observer_set_name {
+            type Token = #token_type_name;
+            type OperationEvent = #operation_event;
+            type EffectEvent = #effect_event;
+
+            fn publish_operation_received<DeliverObserver>(
+                &self,
+                event: &#operation_event,
+                mut deliver: DeliverObserver,
+            )
+            where
+                DeliverObserver: FnMut(#token_type_name, &#operation_event),
+            {
+                for subscription in &self.subscriptions {
+                    if <#filter_type as #filter_match_trait_name>::matches_operation_received(
+                        &subscription.filter,
+                        event,
+                    ) {
+                        deliver(subscription.token, event);
+                    }
+                }
+            }
+
+            fn publish_effect_emitted<DeliverObserver>(
+                &self,
+                event: &#effect_event,
+                mut deliver: DeliverObserver,
+            )
+            where
+                DeliverObserver: FnMut(#token_type_name, &#effect_event),
+            {
+                for subscription in &self.subscriptions {
+                    if <#filter_type as #filter_match_trait_name>::matches_effect_emitted(
+                        &subscription.filter,
+                        event,
+                    ) {
+                        deliver(subscription.token, event);
+                    }
+                }
+            }
+        }
+
+        /// Compile-time alias that pins a
+        /// [`signal_frame::ObservationProjection`] impl's associated
+        /// types to this channel's `Operation` enum plus the
+        /// `operation_event` / `effect_event` records the contract
+        /// declared. A daemon's projection that types its associated
+        /// types incorrectly fails to satisfy this alias and the
+        /// bridge type-check rejects it.
+        ///
+        /// The `Effect` associated type is intentionally left free:
+        /// the executor's bridge constrains it to its own execution-fact
+        /// type (e.g. `SemaEffect`) when composing the bridge.
+        pub trait #projection_alias_name:
+            ::signal_frame::ObservationProjection<
+                Operation = #operation_enum_name,
+                OperationEvent = #operation_event,
+                EffectEvent = #effect_event,
+            >
+        {
+        }
+
+        impl<ProjectionType> #projection_alias_name for ProjectionType where
+            ProjectionType: ::signal_frame::ObservationProjection<
+                    Operation = #operation_enum_name,
+                    OperationEvent = #operation_event,
+                    EffectEvent = #effect_event,
+                >
+        {
         }
     }
-}
-
-fn event_snake_case(ident: &syn::Ident) -> String {
-    let camel = ident.to_string();
-    let mut snake = String::with_capacity(camel.len() + camel.len() / 4);
-    for (index, character) in camel.chars().enumerate() {
-        if character.is_uppercase() {
-            if index != 0 {
-                snake.push('_');
-            }
-            for lowered in character.to_lowercase() {
-                snake.push(lowered);
-            }
-        } else {
-            snake.push(character);
-        }
-    }
-    snake
 }
