@@ -307,8 +307,16 @@ fn emit_event_enum(block: &EventBlockSpec) -> TokenStream {
 
 fn emit_request_payload_impl(block: &RequestBlockSpec) -> TokenStream {
     let name = &block.name;
+    let heads = block.variants.iter().map(|v| {
+        let variant_string = v.variant_name.to_string();
+        quote! { #variant_string }
+    });
     quote! {
         impl ::signal_frame::RequestPayload for #name {}
+
+        impl ::signal_frame::SignalOperationHeads for #name {
+            const HEADS: &'static [&'static str] = &[ #( #heads, )* ];
+        }
     }
 }
 

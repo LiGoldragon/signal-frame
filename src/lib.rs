@@ -14,7 +14,12 @@
 //! The `signal_channel!` macro lives in the sibling
 //! `signal-frame-macros` crate and is re-exported from this crate.
 //! Consumers import it as `signal_frame::signal_channel`.
+//!
+//! `signal_cli!` emits the compile-time working-vs-owner request-head
+//! dispatch object used by thin component CLIs; component runtime crates
+//! still own argv, sockets, daemon clients, and reply rendering.
 
+pub mod command_line;
 pub mod error;
 pub mod exchange;
 pub mod frame;
@@ -26,6 +31,10 @@ pub mod request;
 pub mod subscription;
 pub mod version;
 
+pub use command_line::{
+    CommandLineDispatch, CommandLineRouteError, CommandLineRouteTable, CommandLineSocket,
+    SignalOperationHeads,
+};
 pub use error::FrameError;
 pub use exchange::{
     ExchangeHandshake, ExchangeIdentifier, ExchangeLane, ExchangeMode, LaneSequence, SessionEpoch,

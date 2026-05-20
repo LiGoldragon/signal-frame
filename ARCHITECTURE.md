@@ -101,6 +101,11 @@ executor lowering, logging, introspection).
   a closed-enum `ObserverFilter` with matching impl. Non-persona
   utilities may simply omit the `observable` block; if they do
   declare one, the same `Tap`/`Untap` injection applies.
+- `SignalOperationHeads`, `CommandLineRouteTable`, and
+  `signal_cli!` — compile-time request-head metadata and a generated
+  working-vs-owner dispatch object for thin component CLIs. The
+  actual argv parsing, socket selection, daemon client, and reply
+  rendering stay in each component runtime crate.
 
 ## 2 · Does Not Own
 
@@ -229,6 +234,8 @@ src/exchange.rs       SessionEpoch, ExchangeLane, LaneSequence,
                       ExchangeMode, ExchangeHandshake
 src/subscription.rs   SubscriptionTokenInner
 src/non_empty.rs      NonEmpty<T> and NonEmptyError
+src/command_line.rs   request-head metadata, working/owner route table,
+                      and signal_cli! macro
 src/frame.rs          ExchangeFrame / ExchangeFrameBody,
                       StreamingFrame / StreamingFrameBody,
                       length-prefix helpers

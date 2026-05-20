@@ -83,6 +83,24 @@ signal_channel! {
     }
 }
 
+signal_channel! {
+    channel OwnerMessage {
+        operation Configure(Submission),
+        operation Drain(InboxQuery),
+    }
+    reply OwnerMessageReply {
+        Configured(Receipt),
+        Drained(Inbox),
+    }
+}
+
+signal_frame::signal_cli! {
+    pub struct MessageCommandLineDispatch {
+        working MessageOperation;
+        owner OwnerMessageOperation;
+    }
+}
+
 fn fresh_exchange() -> ExchangeIdentifier {
     ExchangeIdentifier::new(
         SessionEpoch::new(1),
@@ -124,6 +142,36 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
     let mut decoder = nota_codec::Decoder::new(&text);
     let decoded = Request::<MessageOperation>::decode(&mut decoder).expect("decode");
     assert_eq!(decoded, request);
+}
+
+#[test]
+fn macro_emits_static_operation_heads_for_cli_dispatch() {
+    assert_eq!(
+        <MessageOperation as signal_frame::SignalOperationHeads>::HEADS,
+        &["Submit", "Query"]
+    );
+    assert_eq!(
+        <OwnerMessageOperation as signal_frame::SignalOperationHeads>::HEADS,
+        &["Configure", "Drain"]
+    );
+}
+
+#[test]
+fn signal_cli_macro_routes_heads_to_working_or_owner_socket() {
+    let dispatch = MessageCommandLineDispatch::new();
+
+    assert_eq!(
+        dispatch.route_head("Submit").expect("working head routes"),
+        signal_frame::CommandLineSocket::Working
+    );
+    assert_eq!(
+        dispatch.route_head("Drain").expect("owner head routes"),
+        signal_frame::CommandLineSocket::Owner
+    );
+    assert!(matches!(
+        dispatch.route_head("Unknown"),
+        Err(signal_frame::CommandLineRouteError::UnknownRequestHead { .. })
+    ));
 }
 
 #[test]
