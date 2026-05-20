@@ -601,8 +601,8 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
                 let head = decoder.peek_record_head()?;
                 match head.as_str() {
                     #( #decode_arms, )*
-                    other => Err(::nota_codec::Error::UnknownKindForVerb {
-                        verb: #enum_name_string,
+                    other => Err(::nota_codec::Error::UnknownVariant {
+                        enum_name: #enum_name_string,
                         got: other.to_string(),
                     }),
                 }
@@ -1003,8 +1003,8 @@ fn emit_default_filter(
                         decoder.expect_record_end()?;
                         Ok(Self::EffectsOnly)
                     }
-                    other => Err(::nota_codec::Error::UnknownKindForVerb {
-                        verb: stringify!(#filter_type),
+                    other => Err(::nota_codec::Error::UnknownVariant {
+                        enum_name: stringify!(#filter_type),
                         got: other.to_string(),
                     }),
                 }

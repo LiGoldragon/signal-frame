@@ -312,8 +312,8 @@ impl NotaDecode for LedgerObserverFilter {
                 decoder.expect_record_end()?;
                 Ok(Self::OnlyEffects)
             }
-            other => Err(nota_codec::Error::UnknownKindForVerb {
-                verb: "LedgerObserverFilter",
+            other => Err(nota_codec::Error::UnknownVariant {
+                enum_name: "LedgerObserverFilter",
                 got: other.to_string(),
             }),
         }

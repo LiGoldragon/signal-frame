@@ -473,8 +473,8 @@ impl NotaDecode for NotaChannelRequest {
         match head.as_str() {
             "Submit" => Ok(Self::Submit(NotaSubmit::decode(decoder)?)),
             "Inbox" => Ok(Self::Inbox(NotaInbox::decode(decoder)?)),
-            other => Err(nota_codec::Error::UnknownKindForVerb {
-                verb: "NotaChannelRequest",
+            other => Err(nota_codec::Error::UnknownVariant {
+                enum_name: "NotaChannelRequest",
                 got: other.to_string(),
             }),
         }
