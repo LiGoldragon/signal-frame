@@ -202,7 +202,271 @@ executor lowering, logging, introspection).
   `per_operation` aligns with the originating request's operation
   index. No universal verb tag.
 
-## 5 · Migration history — from signal-core to signal-frame
+## 5 · Three-Tier Signal Sizing + Verb Namespace
+
+*Cross-cutting wire-and-observation discipline that every domain
+channel inherits through `signal_channel!`. Captured per Spirit
+records 244 (three-tier sizing baseline), 251 (Part 1 leans
+ratified), 271 (64-bit verb-namespace structure), 272 (universal
+data variants pre-allocated across namespaces), 273 (extended
+64-byte tier for identity-bearing payloads).*
+
+### 5.1 · Three tiers — what they are and why
+
+Every Signal type — `Operation`, `Reply`, `Effect`, and
+`SemaObservation` from sibling `signal-sema` — exists at three
+projections of progressively richer fidelity:
+
+```mermaid
+flowchart LR
+    signal_type["A Signal type<br/>(Operation, Reply, Effect, SemaObservation)"]
+
+    subgraph tier_one [Tier 1 — 64-bit micro 8 bytes]
+        tier_one_node["LogVariant projection<br/>autogen via signal_channel macro<br/>byte 0 root verb + bytes 1-7 sub-variants"]
+    end
+
+    subgraph tier_two [Tier 2 — 64-byte summary 512 bits]
+        tier_two_node["LogSummary projection<br/>hand-impl when natural<br/>public key, identity, short string + context"]
+    end
+
+    subgraph tier_three [Tier 3 — Full rkyv record]
+        tier_three_node["Existing wire shape<br/>unrestricted size, full semantics"]
+    end
+
+    signal_type --> tier_one_node
+    signal_type -.->|if defined| tier_two_node
+    signal_type ==>|always| tier_three_node
+```
+
+Three audiences need three fidelities:
+
+- **Tier 1** — log writers, hot indexers, dashboard histograms,
+  `persona-introspect` aggregation. 8 bytes per event scales to
+  ~134 million events per gigabyte. Tag-only — no payload.
+- **Tier 2** — auditors, slow dashboards, observers that need to
+  follow the story without the full payload. 64 bytes fits one
+  Ed25519 public key (32 bytes) plus 32 bytes of typed context, or
+  one BLS12-381 G1 compressed point (48 bytes) plus identity tags.
+- **Tier 3** — replay, full semantic consumers (Mind, router,
+  downstream daemons). The existing rkyv record.
+
+The discipline: **Tier 1 is mandatory and autogen; Tier 2 is opt-in
+hand-impl when a semantic summary exists; Tier 3 is the existing
+record.** Producers emit each tier on demand based on per-tier
+subscriber count.
+
+### 5.2 · The 64-bit verb-namespace structure (Tier 1 shape)
+
+Tier 1 is not a free-form 64-bit field — it carries a standardized
+verb namespace. **One byte 0 root verb plus seven bytes 1-7
+sub-variants, eight enums total, packed into a `u64`.** The root
+verb is the "beingness" of the signal type — its most universal
+quality. Sub-variants are data-carrying classifications attached to
+the verb namespace.
+
+```mermaid
+flowchart LR
+    byte_zero["byte 0<br/>ROOT VERB<br/>beingness"]
+    byte_one["byte 1<br/>sub-variant 1"]
+    byte_two["byte 2<br/>sub-variant 2"]
+    byte_three["byte 3<br/>sub-variant 3"]
+    byte_four["byte 4<br/>sub-variant 4"]
+    byte_five["byte 5<br/>sub-variant 5"]
+    byte_six["byte 6<br/>sub-variant 6"]
+    byte_seven["byte 7<br/>sub-variant 7"]
+
+    byte_zero --- byte_one --- byte_two --- byte_three --- byte_four --- byte_five --- byte_six --- byte_seven
+
+    style byte_zero fill:#fef
+```
+
+**Why verbs at the root.** Verbs unify across namespaces — `Help`,
+`Query`, `Message`, `Submit`, `Tap`, `Assert` are common across
+many components — while domain nouns are component-specific. Putting
+the verb at byte 0 (LSB) makes histogram aggregation cheap: take
+the low byte and you have the root operation kind for cross-cutting
+analysis. The verb-space itself is a single enum (one enum, ≤256
+verbs), shared across the workspace; each namespace inherits the
+same byte-0 vocabulary.
+
+**Eight enums per type:** one root verb enum + seven sub-variant
+enums. The sub-variant enums are namespace-specific (each component
+contract declares its own seven), but bytes 1-7 always carry
+sub-variant classifications, never raw payload data.
+
+### 5.3 · Universal data variants — shared sub-variant vocabulary
+
+Per Spirit record 272, **every namespace pre-allocates a base set
+of universal data sub-variants**, so all namespaces share a common
+primitive vocabulary in bytes 1-7. The current universal set:
+
+| Variant | Width | Use |
+|---|---|---|
+| `U8` | 1 byte | generic small counter, sub-tag, qualitative magnitude |
+| `U16` | 2 bytes | short identifiers (e.g. Criome 16-bit short ID derived from a public key, with polite-rename-on-collision convention) |
+
+The universal set grows over time as new primitive types prove
+useful across multiple namespaces; the macro grammar reserves an
+inheritance hook so adding a new universal does not force every
+channel to re-emit. The point is that an observer reading a
+cross-component Tier 1 stream sees `U16` carrying the same semantics
+in `signal-spirit`, `signal-criome`, `signal-mind`, etc.
+
+### 5.4 · Macro autogen — the decision tree
+
+`signal_channel!` autogen for `LogVariant` walks the type per the
+decision tree below (originally /155 §1.5, refined for the
+verb-namespace structure):
+
+```mermaid
+flowchart TB
+    start_node["Macro sees a type definition"]
+    enum_check{"Is it a flat enum<br/>with all unit variants?"}
+    data_check{"Is it a data-carrying enum<br/>struct or tuple variants?"}
+    payload_check{"Does every variant payload<br/>itself implement LogVariant?"}
+
+    flat_path["Auto-derive: root verb at byte 0,<br/>upper 7 bytes zero"]
+    nested_path["Auto-derive: root verb at byte 0,<br/>recurse into payload at bytes 1-7"]
+    primitive_path["Auto-derive: root verb at byte 0,<br/>recurse for each field,<br/>bit-pack into bytes 1-7 if fits"]
+    fallback_path["Auto-derive: root verb at byte 0,<br/>upper 56 bits zero,<br/>emit warning suggesting hand impl"]
+
+    start_node --> enum_check
+    enum_check -->|yes| flat_path
+    enum_check -->|no| data_check
+    data_check -->|yes| payload_check
+    payload_check -->|yes| nested_path
+    payload_check -->|no but fields are primitives| primitive_path
+    payload_check -->|no opaque variants| fallback_path
+```
+
+The root verb discriminator is **always** at byte 0 — invariant of
+the macro. Hand-impl only the projection (e.g. "the first 8 bytes
+of a BLS signature"); never break the byte-0 root-verb rule.
+
+### 5.5 · How `signal_channel!` plays — variant always at root
+
+Because `signal_channel!`-generated `Operation`, `Reply`, `Effect`,
+and (when observable) the observer event types are all enums at
+the top level, the root-verb invariant is satisfied by macro
+construction. The per-channel `Operation` enum's variant
+discriminator IS the byte-0 root verb for that channel's Tier 1
+stream. Sub-variants in bytes 1-7 are channel-defined.
+
+Internal data records (the structs declared in `signal-<component>`
+crates that ride inside payloads) do not need to reshape into
+top-level enums to participate in Tier 1. They emit a constant
+discriminator (one possible "root verb" for that record family) plus
+packed fields, per the §5.4 decision tree's bottom branches.
+
+### 5.6 · Tier 2 — extended 64-byte / 512-bit identity-bearing tier
+
+Per Spirit record 273, Tier 2 carries payloads needing **public
+keys, identities, or larger structured data**. The canonical use
+case: a Criome authorization payload carrying quorum public keys
+plus a signature. The tier sits between Tier 1 (root verb plus
+packed sub-variants) and Tier 3 (full unrestricted rkyv), and
+**lets authoritative identity ride with a log entry without
+dropping into Tier 3.**
+
+64-byte budget supports:
+
+| Shape | Fit |
+|---|---|
+| Ed25519 public key (32) + typed context (32) | exact |
+| BLS12-381 G1 compressed point (48) + metadata (16) | exact |
+| SHA-256 / Blake3 hash (32) + other context (32) | exact |
+| Short string up to ~60 bytes + length prefix | exact |
+| Eight `u64`s | exact |
+| Two `ContractVersion` (32 each) | exact |
+| `ComponentName` + `Version` + a couple of enum tags | natural for owner-signal-version-handover summaries |
+
+The `LogSummary` trait carries a const-generic compile-time size
+check (`size_of::<Self::Summary>() <= 64`). Over-budget summaries
+fail to compile, not at runtime.
+
+### 5.7 · Three subscription tiers — `observable` block extension
+
+The mandatory observable surface (`Tap(<FilterType>)` / `Untap`
+injected by the macro per the three-layer model affirmed
+2026-05-20) extends to expose **three subscription tiers** rather
+than one full-record stream:
+
+```mermaid
+flowchart LR
+    observable_channel["observable channel<br/>per-contract"]
+    observable_channel --> sub_one["Subscribe Tier 1<br/>u64 verb-namespace stream"]
+    observable_channel --> sub_two["Subscribe Tier 2<br/>64-byte summary stream"]
+    observable_channel --> sub_three["Subscribe Tier 3<br/>full record stream"]
+
+    sub_one --> aud_log["log writer<br/>~M events/sec"]
+    sub_one --> aud_idx["hot indexer<br/>per-verb counters"]
+    sub_two --> aud_dash["dashboard<br/>audit summaries"]
+    sub_two --> aud_introspect["persona-introspect<br/>cross-component aggregation"]
+    sub_three --> aud_replay["replay<br/>reconstruction"]
+    sub_three --> aud_mind["Mind<br/>full semantic intake"]
+```
+
+Producer cost: one projection per active tier. Most channels will
+in practice have Tier 1 + Tier 3 subscribers; Tier 2 is opt-in
+where it adds enough fidelity to justify a hand-implemented
+summary. The runtime tracks per-tier subscriber count and emits
+each tier on demand — subscribers that pay only for Tier 1 do not
+force the producer to project Tier 2.
+
+### 5.8 · Storage efficiency at observer side
+
+Persona-introspect (or any observer with persistence) materializes
+three storage tiers from the three subscription tiers, with roughly
+8x cost ratio between adjacent tiers:
+
+| Tier | Size | Per GB | Retention |
+|---|---|---|---|
+| Tier 1 hot | 8 bytes | ~134M events | indefinite (cheap) |
+| Tier 2 warm | 64 bytes | ~16M summaries | 30-90 days |
+| Tier 3 cold | variable rkyv | ~5M records (typical) | per-record TTL |
+
+Tier 1 fits comfortably in a single SSD write stream at 1M
+events/sec; Tier 3 needs batching + compression to keep up at
+sustained rates. The verb-namespace structure makes Tier 1 indexes
+particularly efficient — group-by-byte-0 gives the root-verb
+histogram in a single linear scan.
+
+### 5.9 · What this section owns vs delegates
+
+`signal-frame` owns the `LogVariant` and `LogSummary` traits, the
+`signal_channel!` macro autogen logic for Tier 1, the universal
+data sub-variant set, and the three-subscription-tier shape in the
+mandatory observable block. The macro implementation lives in
+sibling `signal-frame-macros`.
+
+`signal-frame` does NOT own:
+
+- Per-channel root-verb vocabulary — each `signal-<component>`
+  crate names its own operation verbs (`Submit`, `Query`,
+  `Configure`, etc.); the workspace-shared root-verb registry is
+  a separate concern (see §5.10 below).
+- Per-channel sub-variant enums beyond the universal set —
+  contract crates declare seven sub-variant enums per channel as
+  needed.
+- Persisted storage of any tier — observers materialize their own
+  storage tiers from the subscription streams.
+
+### 5.10 · Open follow-ons
+
+- The macro implementation for `LogVariant` autogen tracks under
+  bead `primary-l02o` (signal-frame: LogVariant trait + autogen
+  derive macro).
+- The specific universal-data-variant set beyond `U8` / `U16` is
+  not yet decided; new primitives land as concrete cross-component
+  needs surface (Spirit record 272 leaves room for "possibly more
+  primitive types").
+- A workspace-wide root-verb registry mechanism is not yet
+  specified — currently each channel's root verbs are namespace-
+  local enum variants. A future cross-namespace vocabulary catalog
+  (so `Tap` always means `Tap` regardless of channel) is a follow-on
+  worth a dedicated bead.
+
+## 6 · Migration history — from signal-core to signal-frame
 
 This crate was extracted from the former `signal-core` on
 2026-05-19 as part of the contract-local-verb architecture
@@ -239,7 +503,7 @@ redirection. The split:
 The `signal_channel!` macro now accepts contract-local operations
 directly through `operation <Verb>(<Payload>)`.
 
-## 6 · Code Map
+## 7 · Code Map
 
 ```text
 src/lib.rs            module entry and re-exports
