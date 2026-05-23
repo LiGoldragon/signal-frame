@@ -53,6 +53,10 @@ executor lowering, logging, introspection).
   Splitting keeps non-streaming channels' match patterns clean (no
   uninhabited event arm to discharge) and makes the schema honestly
   reflect which channels emit pushed events.
+- `ShortHeader` — the mandatory 64-bit Tier 1 prefix at the front of
+  every frame archive. `Frame::new(body)` creates an empty short
+  header for compatibility; projection-aware constructors use
+  `Frame::with_short_header(short_header, body)`.
 - `ProtocolVersion`, `ExchangeMode`, `ExchangeHandshake`, and
   handshake request/reply records.
 - `ExchangeIdentifier`, `StreamEventIdentifier`, `ExchangeLane`,
@@ -221,7 +225,7 @@ projections of progressively richer fidelity:
 flowchart LR
     signal_type["A Signal type<br/>(Operation, Reply, Effect, SemaObservation)"]
 
-    subgraph tier_one [Tier 1 — 64-bit micro 8 bytes]
+    subgraph tier_one [Tier 1 — short header 8 bytes]
         tier_one_node["LogVariant projection<br/>autogen via signal_channel macro<br/>byte 0 root verb + bytes 1-7 sub-variants"]
     end
 
@@ -255,7 +259,7 @@ hand-impl when a semantic summary exists; Tier 3 is the existing
 record.** Producers emit each tier on demand based on per-tier
 subscriber count.
 
-### 5.2 · The 64-bit verb-namespace structure (Tier 1 shape)
+### 5.2 · The short-header verb-namespace structure (Tier 1 shape)
 
 Tier 1 is not a free-form 64-bit field — it carries a standardized
 verb namespace. **One byte 0 root verb plus seven bytes 1-7
@@ -263,6 +267,16 @@ sub-variants, eight enums total, packed into a `u64`.** The root
 verb is the "beingness" of the signal type — its most universal
 quality. Sub-variants are data-carrying classifications attached to
 the verb namespace.
+
+Per Spirit records 388-392, the canonical name of this 64-bit prefix
+is **short header**. The MVP shape is deliberately simple: one root
+enum plus seven sub-enums, one full byte each. Both `ExchangeFrame`
+and `StreamingFrame` encode the short header immediately after the
+length prefix and before the archived frame body, so length-prefixed
+socket readers can inspect bytes `4..12` without deserializing the
+full frame body. The length prefix remains big-endian `u32`; the
+short header uses little-endian `u64` bytes to match the workspace
+rkyv pin.
 
 ```mermaid
 flowchart LR
@@ -280,19 +294,51 @@ flowchart LR
     style byte_zero fill:#fef
 ```
 
-**Why verbs at the root.** Verbs unify across namespaces — `Help`,
-`Query`, `Message`, `Submit`, `Tap`, `Assert` are common across
-many components — while domain nouns are component-specific. Putting
-the verb at byte 0 (LSB) makes histogram aggregation cheap: take
-the low byte and you have the root operation kind for cross-cutting
-analysis. The verb-space itself is a single enum (one enum, ≤256
-verbs), shared across the workspace; each namespace inherits the
-same byte-0 vocabulary.
+**Why verbs at the root.** Verbs are the most universal quality of
+a signal type — putting them at byte 0 (LSB) lets the daemon
+classify and dispatch on the root operation kind cheaply via a
+single byte read. Within a single channel, byte-0 histograms give
+the channel's root-verb distribution in a linear scan.
+
+**The byte-0 namespace is per-component, not workspace-wide.** Each
+contract crate (each channel) declares its OWN root verb enum local
+to that channel. Same byte value on different channels means
+different verbs — the decoder reads byte 0 IN THE CONTEXT of which
+channel the byte stream came from (provenance). The consumer always
+knows its subscription channel; provenance is implicit at the
+subscription boundary. Per spirit record 326 (correction superseding
+the shared-workspace-enum framing this section originally carried)
+and detailed in `reports/designer/305-v2-design-64bit-signal-per-component-namespacing.md`.
+
+**Byte-0 split between owner and ordinary contracts** (per spirit
+record 327, under detailed design): for a component triad, the
+ordinary `signal-<comp>` contract and the owner `owner-signal-<comp>`
+contract each claim a SECTION of the 256-variant byte-0 space,
+divided at the golden ratio (~0.39 / 0.61). The macro enforces
+compile-time agreement between the two contracts (both must agree
+on which side is the small section and which is the big — if both
+claim the same side, compilation fails). Default: owner contract
+takes the small section, ordinary contract takes the big. The split
+opens the potential for single-socket-per-component dispatch where
+the byte-0 section IS the owner-vs-ordinary discriminator (Medium
+certainty exploration). Detailed mechanism lands in
+`reports/designer/307-design-golden-ratio-namespace-split.md` once
+that design completes.
+
+**Cross-channel verb aggregation** is semantic, not byte-level.
+"How many Record-shaped operations across the workspace today?"
+requires the rollup-er to know which channel's byte-X means "Record"
+on that channel — the same byte value on another channel may mean
+something entirely different. The per-component namespacing
+prevents cross-channel byte conflation and makes per-channel
+indexing maximally efficient — both desired outcomes.
 
 **Eight enums per type:** one root verb enum + seven sub-variant
-enums. The sub-variant enums are namespace-specific (each component
-contract declares its own seven), but bytes 1-7 always carry
-sub-variant classifications, never raw payload data.
+enums, all local to the channel. The sub-variant enums are
+namespace-specific (each component contract declares its own
+seven), and bytes 1-7 always carry sub-variant classifications,
+never raw payload data. Universal data variants (per §5.3) are
+inherited by every channel's slot enums.
 
 ### 5.3 · Universal data variants — shared sub-variant vocabulary
 

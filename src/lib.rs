@@ -43,7 +43,10 @@ pub use exchange::{
     ExchangeHandshake, ExchangeIdentifier, ExchangeLane, ExchangeMode, LaneSequence, SessionEpoch,
     StreamEventIdentifier,
 };
-pub use frame::{ExchangeFrame, ExchangeFrameBody, StreamingFrame, StreamingFrameBody};
+pub use frame::{
+    ExchangeFrame, ExchangeFrameBody, SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrame,
+    StreamingFrameBody, short_header_from_archive, short_header_from_length_prefixed,
+};
 pub use identity::{Revision, Slot};
 pub use namespace::{NamespaceSection, SECTION_CUTOFF};
 pub use non_empty::{NonEmpty, NonEmptyError};

@@ -7,6 +7,40 @@ use crate::request::Request;
 use crate::subscription::SubscriptionTokenInner;
 use crate::version::{HandshakeReply, HandshakeRequest};
 
+pub const SHORT_HEADER_BYTE_COUNT: usize = 8;
+
+/// The mandatory 64-bit pre-typed frame prefix.
+///
+/// The length-prefixed wire shape is:
+///
+/// `u32 length` -> little-endian `ShortHeader` bytes -> archived frame body.
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
+)]
+pub struct ShortHeader(u64);
+
+impl ShortHeader {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+
+    pub const fn to_le_bytes(self) -> [u8; SHORT_HEADER_BYTE_COUNT] {
+        self.0.to_le_bytes()
+    }
+
+    pub const fn from_le_bytes(bytes: [u8; SHORT_HEADER_BYTE_COUNT]) -> Self {
+        Self(u64::from_le_bytes(bytes))
+    }
+}
+
 /// Frame body for an exchange-only channel — handshake + request/reply
 /// only. No `SubscriptionEvent` variant; channels that stream events
 /// use [`StreamingFrameBody`] instead.
@@ -49,19 +83,32 @@ pub enum StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
     },
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExchangeFrame<RequestPayload, ReplyPayload> {
+    pub short_header: ShortHeader,
     pub body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamingFrame<RequestPayload, ReplyPayload, EventPayload> {
+    pub short_header: ShortHeader,
     pub body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
 }
 
 impl<RequestPayload, ReplyPayload> ExchangeFrame<RequestPayload, ReplyPayload> {
     pub fn new(body: ExchangeFrameBody<RequestPayload, ReplyPayload>) -> Self {
-        Self { body }
+        Self::with_short_header(ShortHeader::empty(), body)
+    }
+
+    pub fn with_short_header(
+        short_header: ShortHeader,
+        body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
+    ) -> Self {
+        Self { short_header, body }
+    }
+
+    pub fn short_header(&self) -> ShortHeader {
+        self.short_header
     }
 
     pub fn body(&self) -> &ExchangeFrameBody<RequestPayload, ReplyPayload> {
@@ -77,7 +124,18 @@ impl<RequestPayload, ReplyPayload, EventPayload>
     StreamingFrame<RequestPayload, ReplyPayload, EventPayload>
 {
     pub fn new(body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>) -> Self {
-        Self { body }
+        Self::with_short_header(ShortHeader::empty(), body)
+    }
+
+    pub fn with_short_header(
+        short_header: ShortHeader,
+        body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
+    ) -> Self {
+        Self { short_header, body }
+    }
+
+    pub fn short_header(&self) -> ShortHeader {
+        self.short_header
     }
 
     pub fn body(&self) -> &StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
@@ -130,13 +188,42 @@ fn strip_length_prefix(bytes: &[u8]) -> Result<&[u8], FrameError> {
     Ok(payload)
 }
 
+pub fn short_header_from_archive(bytes: &[u8]) -> Result<ShortHeader, FrameError> {
+    let header = bytes
+        .get(..SHORT_HEADER_BYTE_COUNT)
+        .ok_or(FrameError::ShortHeaderTooShort { found: bytes.len() })?;
+    let mut header_bytes = [0; SHORT_HEADER_BYTE_COUNT];
+    header_bytes.copy_from_slice(header);
+    Ok(ShortHeader::from_le_bytes(header_bytes))
+}
+
+pub fn short_header_from_length_prefixed(bytes: &[u8]) -> Result<ShortHeader, FrameError> {
+    short_header_from_archive(strip_length_prefix(bytes)?)
+}
+
+fn encode_frame_archive<Body>(short_header: ShortHeader, body: &Body) -> Result<Vec<u8>, FrameError>
+where
+    Body: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
+{
+    let body_archive = encode_archive(body)?;
+    let mut frame_archive = Vec::with_capacity(SHORT_HEADER_BYTE_COUNT + body_archive.len());
+    frame_archive.extend_from_slice(&short_header.to_le_bytes());
+    frame_archive.extend_from_slice(&body_archive);
+    Ok(frame_archive)
+}
+
+fn strip_short_header(bytes: &[u8]) -> Result<(ShortHeader, &[u8]), FrameError> {
+    let short_header = short_header_from_archive(bytes)?;
+    Ok((short_header, &bytes[SHORT_HEADER_BYTE_COUNT..]))
+}
+
 impl<RequestPayload, ReplyPayload> ExchangeFrame<RequestPayload, ReplyPayload>
 where
     RequestPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
 {
     pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
-        encode_archive(self)
+        encode_frame_archive(self.short_header, &self.body)
     }
 
     pub fn encode_length_prefixed(&self) -> Result<Vec<u8>, FrameError> {
@@ -152,7 +239,7 @@ where
     EventPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
 {
     pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
-        encode_archive(self)
+        encode_frame_archive(self.short_header, &self.body)
     }
 
     pub fn encode_length_prefixed(&self) -> Result<Vec<u8>, FrameError> {
@@ -172,8 +259,13 @@ where
         > + RkyvDeserialize<ReplyPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
 {
     pub fn decode(bytes: &[u8]) -> Result<Self, FrameError> {
-        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes)
-            .map_err(|_| FrameError::ArchiveDeserialize)
+        let (short_header, body_archive) = strip_short_header(bytes)?;
+        let body = rkyv::from_bytes::<
+            ExchangeFrameBody<RequestPayload, ReplyPayload>,
+            rkyv::rancor::Error,
+        >(body_archive)
+        .map_err(|_| FrameError::ArchiveDeserialize)?;
+        Ok(Self::with_short_header(short_header, body))
     }
 
     pub fn decode_length_prefixed(bytes: &[u8]) -> Result<Self, FrameError> {
@@ -198,8 +290,13 @@ where
         > + RkyvDeserialize<EventPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
 {
     pub fn decode(bytes: &[u8]) -> Result<Self, FrameError> {
-        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes)
-            .map_err(|_| FrameError::ArchiveDeserialize)
+        let (short_header, body_archive) = strip_short_header(bytes)?;
+        let body = rkyv::from_bytes::<
+            StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
+            rkyv::rancor::Error,
+        >(body_archive)
+        .map_err(|_| FrameError::ArchiveDeserialize)?;
+        Ok(Self::with_short_header(short_header, body))
     }
 
     pub fn decode_length_prefixed(bytes: &[u8]) -> Result<Self, FrameError> {

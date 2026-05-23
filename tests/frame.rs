@@ -5,8 +5,8 @@ use signal_frame::{
     ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRejectionReason,
     HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty, OperationFailureReason,
     ProtocolVersion, Reply, Request, RequestPayload, RetryClassification, Revision, SessionEpoch,
-    Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply,
-    SubscriptionTokenInner,
+    ShortHeader, Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply,
+    SubscriptionTokenInner, short_header_from_archive, short_header_from_length_prefixed,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -113,6 +113,53 @@ fn request_frame_round_trips() {
         }
         _ => panic!("expected request frame"),
     }
+}
+
+#[test]
+fn exchange_frame_defaults_to_empty_short_header() {
+    let frame = ExchangeFrame::<DomainRequest, DomainReply>::new(
+        ExchangeFrameBody::HandshakeRequest(HandshakeRequest::current()),
+    );
+
+    assert_eq!(frame.short_header(), ShortHeader::empty());
+}
+
+#[test]
+fn exchange_frame_short_header_round_trips_and_is_peekable() {
+    let exchange = fresh_exchange();
+    let short_header = ShortHeader::new(0x0807_0605_0403_0201);
+    let request = DomainRequest::new("Node").into_request();
+    let frame = ExchangeFrame::<DomainRequest, DomainReply>::with_short_header(
+        short_header,
+        ExchangeFrameBody::Request {
+            exchange,
+            request: request.clone(),
+        },
+    );
+
+    let archive = frame.encode().unwrap();
+    assert_eq!(short_header_from_archive(&archive).unwrap(), short_header);
+    assert_eq!(&archive[..8], &short_header.to_le_bytes());
+
+    let bytes = frame.encode_length_prefixed().unwrap();
+    assert_eq!(
+        short_header_from_length_prefixed(&bytes).unwrap(),
+        short_header
+    );
+    assert_eq!(&bytes[4..12], &short_header.to_le_bytes());
+
+    let decoded =
+        ExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+    assert_eq!(decoded.short_header(), short_header);
+    assert_eq!(decoded.body(), frame.body());
+}
+
+#[test]
+fn short_header_peek_rejects_short_payload() {
+    let bytes = [0, 0, 0, 7, 1, 2, 3, 4, 5, 6, 7];
+
+    let err = short_header_from_length_prefixed(&bytes).expect_err("short header must fail");
+    assert!(matches!(err, FrameError::ShortHeaderTooShort { found: 7 }));
 }
 
 #[test]
@@ -392,6 +439,40 @@ fn streaming_frame_subscription_event_round_trips() {
         }
         _ => panic!("expected subscription event"),
     }
+}
+
+#[test]
+fn streaming_frame_short_header_round_trips_and_is_peekable() {
+    let event_identifier = StreamEventIdentifier::new(
+        SessionEpoch::new(1),
+        ExchangeLane::Acceptor,
+        LaneSequence::first(),
+    );
+    let short_header = ShortHeader::new(0x0102_0304_0506_0708);
+    let frame: StreamingFrame<DomainRequest, DomainReply, DomainEvent> =
+        StreamingFrame::with_short_header(
+            short_header,
+            StreamingFrameBody::SubscriptionEvent {
+                event_identifier,
+                token: SubscriptionTokenInner::new(7),
+                event: DomainEvent {
+                    note: "thought arrived".into(),
+                },
+            },
+        );
+
+    let bytes = frame.encode_length_prefixed().unwrap();
+    assert_eq!(
+        short_header_from_length_prefixed(&bytes).unwrap(),
+        short_header
+    );
+    assert_eq!(&bytes[4..12], &short_header.to_le_bytes());
+
+    let decoded =
+        StreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(&bytes)
+            .unwrap();
+    assert_eq!(decoded.short_header(), short_header);
+    assert_eq!(decoded.body(), frame.body());
 }
 
 // ─── Request NOTA witnesses under the contract-local shape ───
