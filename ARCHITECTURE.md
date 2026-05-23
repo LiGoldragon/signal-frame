@@ -136,7 +136,7 @@ executor lowering, logging, introspection).
 - redb tables, reducers, or actor supervision.
 - Authentication, provenance, or socket-peer policy. Local trust
   belongs to daemon/socket ingress and to dedicated contracts such
-  as `signal-persona-auth`.
+  as `signal-persona-origin`.
 - Caller authentication. `Caller` is advisory process context; daemon
   ingress must use socket credentials and policy contracts for actual
   authority decisions.
