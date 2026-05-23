@@ -335,6 +335,10 @@ struct EnvironmentStem(String);
 impl EnvironmentStem {
     fn from_binary_name(binary_name: &str) -> Self {
         let mut stem = String::from("PERSONA_");
+        let binary_name = binary_name
+            .strip_prefix("persona_")
+            .or_else(|| binary_name.strip_prefix("persona-"))
+            .unwrap_or(binary_name);
         let mut previous_separator = true;
         for character in binary_name.chars() {
             if character.is_ascii_alphanumeric() {

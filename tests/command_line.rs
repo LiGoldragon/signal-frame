@@ -147,6 +147,11 @@ fn command_line_sockets_derive_persona_environment_names_from_binary_name() {
 
     assert_eq!(sockets.working_variable(), "PERSONA_SPIRIT_SOCKET");
     assert_eq!(sockets.owner_variable(), "PERSONA_SPIRIT_OWNER_SOCKET");
+
+    let sockets = CommandLineSockets::from_binary_name("persona_orchestrate");
+
+    assert_eq!(sockets.working_variable(), "PERSONA_ORCHESTRATE_SOCKET");
+    assert_eq!(sockets.owner_variable(), "PERSONA_ORCHESTRATE_OWNER_SOCKET");
 }
 
 #[test]
