@@ -18,6 +18,7 @@ path = "src/lib.rs"
 
 [dependencies]
 nota-codec = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
+paste = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 signal-frame-macros = { version = "0.1", path = "macros" }
 thiserror = "2"

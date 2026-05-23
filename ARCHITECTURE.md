@@ -64,11 +64,17 @@ executor lowering, logging, introspection).
 - `NonEmpty<T>` — the type-level non-empty sequence used as the
   ordered payload unit inside `Request`.
 - `Request<Payload>` carrying `NonEmpty<Payload>` as the ordered
-  exchange unit, with NOTA codec (single payload + bracketed
-  sequence). Each payload is itself a contract operation; the
-  payload's NOTA record head names the contract-local verb. No
-  per-operation wrapper appears — the previous `Operation<Payload>`
-  transparent wrapper has been collapsed out.
+  exchange unit plus optional advisory `Caller` process context, with
+  NOTA codec (single payload + bracketed sequence). Each payload is
+  itself a contract operation; the payload's NOTA record head names the
+  contract-local verb. No per-operation wrapper appears — the previous
+  `Operation<Payload>` transparent wrapper has been collapsed out. The
+  NOTA projection intentionally carries only payloads; `Caller` is
+  injected by thin CLIs at the frame boundary.
+- `Caller`, `ProcessIdentifier`, `ExecutablePath`, and
+  `ProcessStartTime` — best-effort parent-process context captured by
+  a component CLI with `getppid()` plus Linux `/proc` facts. This is an
+  audit/debug witness, not an authority proof.
 - `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
   per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
   distinguishes `Committed` from `OperationAborted { failed_at,
@@ -108,11 +114,15 @@ executor lowering, logging, introspection).
   The macro also emits the structurally obvious `From<Payload> for
   Reply` impls so contract crates do not hand-write conversion
   stacks.
-- `SignalOperationHeads`, `CommandLineRouteTable`, and
-  `signal_cli!` — compile-time request-head metadata and a generated
-  working-vs-owner dispatch object for thin component CLIs. The
-  actual argv parsing, socket selection, daemon client, and reply
-  rendering stay in each component runtime crate.
+- `SingleArgument`, `SignalOperationHeads`, `CommandLineRouteTable`,
+  `CommandLineSockets`, `CommandLineDispatch`, `ClientShape`, and
+  `signal_cli!` — the shared thin-CLI frame client. It enforces the
+  single-argument rule, parses the argument as NOTA text or a file path,
+  dispatches request heads to working vs owner sockets, injects
+  `Caller::from_kernel()`, sends length-prefixed frames, and renders the
+  typed reply payload back to NOTA. Component crates still own their
+  domain records, socket deployment paths, daemon behavior, and
+  authorization policy.
 
 ## 2 · Does Not Own
 
@@ -127,6 +137,9 @@ executor lowering, logging, introspection).
 - Authentication, provenance, or socket-peer policy. Local trust
   belongs to daemon/socket ingress and to dedicated contracts such
   as `signal-persona-auth`.
+- Caller authentication. `Caller` is advisory process context; daemon
+  ingress must use socket credentials and policy contracts for actual
+  authority decisions.
 - Slot allocation, slot dereference, or revision bump behavior.
   Those belong to the Sema engine.
 - Nexus text parsing or rendering over NOTA syntax beyond the codec
@@ -176,6 +189,9 @@ executor lowering, logging, introspection).
   bodies. No in-band authentication or provenance material.
 - Domain payloads remain typed. `signal-frame` does not become a
   generic record bag.
+- `Caller` is not part of the human NOTA request text. CLI-generated
+  requests may carry it in the binary frame; decoded NOTA requests and
+  programmatic constructors default it to `None`.
 - `Reply` is a typed sum (`Accepted` vs `Rejected`); pre-execution
   rejection cannot carry per-operation results, and accepted replies
   always do. Illegal states unrepresentable.
@@ -231,6 +247,8 @@ src/lib.rs            module entry and re-exports
 src/error.rs          typed frame errors
 src/version.rs        ProtocolVersion + handshake records
 src/identity.rs       typed Slot<T> + Revision wire identities
+src/caller.rs         advisory parent-process context used by generated
+                      thin CLIs
 src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<Payload>;
                       Request NOTA codec (single payload + bracketed sequence)
 src/reply.rs          Reply<ReplyPayload> (Accepted / Rejected),
@@ -241,8 +259,8 @@ src/exchange.rs       SessionEpoch, ExchangeLane, LaneSequence,
                       ExchangeMode, ExchangeHandshake
 src/subscription.rs   SubscriptionTokenInner
 src/non_empty.rs      NonEmpty<T> and NonEmptyError
-src/command_line.rs   request-head metadata, working/owner route table,
-                      and signal_cli! macro
+src/command_line.rs   thin-CLI argument, route table, socket client,
+                      reply rendering, and signal_cli! macro
 src/frame.rs          ExchangeFrame / ExchangeFrameBody,
                       StreamingFrame / StreamingFrameBody,
                       length-prefix helpers

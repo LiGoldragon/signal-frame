@@ -9,8 +9,10 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   not here. `Request<Payload>` carries payloads directly — each payload
   is itself a contract operation whose NOTA record head names the
   contract-local verb. There is no per-operation kernel wrapper.
-- Keep runtime code out: no actors, tokio loops, redb stores, terminal
-  adapters, or CLI parsing.
+- Keep daemon/runtime code out: no actors, tokio loops, redb stores, or
+  terminal adapters. Shared thin-CLI frame machinery belongs here when
+  it is domain-free: single-argument parsing, working-vs-owner socket
+  routing, caller capture, frame send/receive, and NOTA reply rendering.
 - Add tests that round-trip real typed frames through rkyv. Do not
   prove behavior by grepping strings.
 - Use full English identifiers and keep reusable behavior on

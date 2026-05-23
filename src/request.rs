@@ -18,6 +18,7 @@ use nota_codec::{
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
+use crate::caller::Caller;
 use crate::non_empty::{NonEmpty, NonEmptyError};
 
 /// One or more contract payloads that commit (or abort) as one unit.
@@ -27,6 +28,7 @@ use crate::non_empty::{NonEmpty, NonEmptyError};
 /// `NonEmpty<Payload>` is the unit.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Request<Payload> {
+    pub caller: Option<Caller>,
     pub payloads: NonEmpty<Payload>,
 }
 
@@ -44,15 +46,28 @@ pub trait RequestPayload: Sized {
 
 impl<Payload> Request<Payload> {
     pub fn from_payloads(payloads: NonEmpty<Payload>) -> Self {
-        Self { payloads }
+        Self {
+            caller: None,
+            payloads,
+        }
     }
 
     pub fn payloads(&self) -> &NonEmpty<Payload> {
         &self.payloads
     }
 
+    pub fn caller(&self) -> Option<&Caller> {
+        self.caller.as_ref()
+    }
+
+    pub fn with_caller(mut self, caller: Option<Caller>) -> Self {
+        self.caller = caller;
+        self
+    }
+
     pub fn from_payload(payload: Payload) -> Self {
         Self {
+            caller: None,
             payloads: NonEmpty::single(payload),
         }
     }
@@ -87,7 +102,10 @@ impl<Payload> RequestBuilder<Payload> {
 
     pub fn build(self) -> std::result::Result<Request<Payload>, RequestBuilderError> {
         match NonEmpty::try_from_vec(self.payloads) {
-            Ok(payloads) => Ok(Request { payloads }),
+            Ok(payloads) => Ok(Request {
+                caller: None,
+                payloads,
+            }),
             Err(NonEmptyError::Empty) => Err(RequestBuilderError::EmptyRequest),
         }
     }
@@ -135,7 +153,10 @@ where
                 }
                 decoder.expect_seq_end()?;
                 match NonEmpty::try_from_vec(payloads) {
-                    Ok(payloads) => Ok(Request { payloads }),
+                    Ok(payloads) => Ok(Request {
+                        caller: None,
+                        payloads,
+                    }),
                     Err(NonEmptyError::Empty) => Err(NotaError::Validation {
                         type_name: "Request",
                         message: "empty payload sequence".into(),
@@ -145,6 +166,7 @@ where
             Some(_) => {
                 let payload = Payload::decode(decoder)?;
                 Ok(Request {
+                    caller: None,
                     payloads: NonEmpty::single(payload),
                 })
             }

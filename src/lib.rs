@@ -15,10 +15,10 @@
 //! `signal-frame-macros` crate and is re-exported from this crate.
 //! Consumers import it as `signal_frame::signal_channel`.
 //!
-//! `signal_cli!` emits the compile-time working-vs-owner request-head
-//! dispatch object used by thin component CLIs; component runtime crates
-//! still own argv, sockets, daemon clients, and reply rendering.
+//! `signal_cli!` emits thin component CLI binaries over the shared frame
+//! client path.
 
+pub mod caller;
 pub mod command_line;
 pub mod error;
 pub mod exchange;
@@ -31,9 +31,11 @@ pub mod request;
 pub mod subscription;
 pub mod version;
 
+pub use caller::{Caller, ExecutablePath, ProcessIdentifier, ProcessStartTime};
 pub use command_line::{
-    CommandLineDispatch, CommandLineRouteError, CommandLineRouteTable, CommandLineSocket,
-    SignalOperationHeads,
+    ClientFrame, ClientShape, CommandLineDispatch, CommandLineError, CommandLineRouteError,
+    CommandLineRouteTable, CommandLineSocket, CommandLineSockets, RequestHead, RequestInput,
+    RequestText, SignalOperationHeads, SingleArgument, SingleArgumentError,
 };
 pub use error::FrameError;
 pub use exchange::{
@@ -55,4 +57,5 @@ pub use version::{
     SIGNAL_FRAME_PROTOCOL_VERSION,
 };
 
+pub use paste;
 pub use signal_frame_macros::signal_channel;
