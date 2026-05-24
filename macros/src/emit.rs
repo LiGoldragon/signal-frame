@@ -27,6 +27,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
 
     let request_payload_impl = emit_request_payload_impl(&augmented.request);
     let log_variant_impl = emit_log_variant_impl(&augmented);
+    let operation_dispatch = emit_operation_dispatch(&augmented.request, &augmented.reply);
     let request_kind = emit_request_kind(&augmented.request);
     let reply_kind = emit_reply_kind(&augmented.reply);
     let event_kind = augmented.event.as_ref().map(emit_event_kind);
@@ -47,6 +48,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
         #event_enum
         #request_payload_impl
         #log_variant_impl
+        #operation_dispatch
         #request_kind
         #reply_kind
         #event_kind
@@ -376,6 +378,91 @@ fn emit_log_variant_impl(spec: &ChannelSpec) -> TokenStream {
                 }
                 u64::from_le_bytes(bytes)
             }
+        }
+    }
+}
+
+fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -> TokenStream {
+    let request_name = &request.name;
+    let reply_name = &reply.name;
+    let handler_trait_name = format_ident!("{}Handler", request_name);
+    let dispatch_trait_name = format_ident!("{}Dispatch", request_name);
+
+    let handler_methods = request.variants.iter().map(|variant| {
+        let variant_name = &variant.variant_name;
+        let payload_type = &variant.payload_type;
+        let method_name = format_ident!("handle_{}", to_snake_case(&variant_name.to_string()));
+        quote! {
+            async fn #method_name(
+                &mut self,
+                payload: #payload_type,
+            ) -> Result<#reply_name, Self::Error>;
+        }
+    });
+
+    let dispatch_arms = request.variants.iter().map(|variant| {
+        let variant_name = &variant.variant_name;
+        let method_name = format_ident!("handle_{}", to_snake_case(&variant_name.to_string()));
+        quote! {
+            #request_name::#variant_name(payload) => self.#method_name(payload).await
+        }
+    });
+
+    quote! {
+        // DESIGN-DECISION-REVIEW (designer/323 §8.3): per-variant
+        // async handler trait. Alternative: one monolithic handler
+        // method or sync handlers. The MVP uses async because the
+        // first consumer is a Kameo/Tokio daemon.
+        #[allow(async_fn_in_trait)]
+        pub trait #handler_trait_name {
+            type Error;
+
+            #( #handler_methods )*
+        }
+
+        #[allow(async_fn_in_trait)]
+        pub trait #dispatch_trait_name: #handler_trait_name
+        where
+            Self::Error: From<::signal_frame::OperationDispatchError>,
+        {
+            async fn dispatch_operation(
+                &mut self,
+                operation: #request_name,
+            ) -> Result<#reply_name, Self::Error> {
+                match operation {
+                    #( #dispatch_arms, )*
+                }
+            }
+
+            async fn dispatch(
+                &mut self,
+                short_header: ::signal_frame::ShortHeader,
+                operation: #request_name,
+            ) -> Result<#reply_name, Self::Error> {
+                let expected = short_header.to_le_bytes()[0];
+                let Some(expected_kind) = #request_name::kind_from_short_header(short_header) else {
+                    return Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
+                        root: expected,
+                    }
+                    .into());
+                };
+                let actual_kind = operation.kind();
+                if actual_kind != expected_kind {
+                    return Err(::signal_frame::OperationDispatchError::HeaderOperationMismatch {
+                        expected,
+                        actual: actual_kind as u8,
+                    }
+                    .into());
+                }
+                self.dispatch_operation(operation).await
+            }
+        }
+
+        impl<Handler> #dispatch_trait_name for Handler
+        where
+            Handler: #handler_trait_name,
+            Handler::Error: From<::signal_frame::OperationDispatchError>,
+        {
         }
     }
 }

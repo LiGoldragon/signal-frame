@@ -28,6 +28,7 @@ pub mod log_variant;
 pub mod namespace;
 pub mod non_empty;
 pub mod observable;
+pub mod operation_dispatch;
 pub mod reply;
 pub mod request;
 pub mod subscription;
@@ -53,6 +54,7 @@ pub use log_variant::LogVariant;
 pub use namespace::{NamespaceSection, SECTION_CUTOFF};
 pub use non_empty::{NonEmpty, NonEmptyError};
 pub use observable::{ObservableSet, ObservationProjection};
+pub use operation_dispatch::OperationDispatchError;
 pub use reply::{
     AcceptedOutcome, BatchErrorClassification, BatchFailureReason, CommitStatus,
     OperationFailureReason, Reply, RequestRejectionReason, RetryClassification, SubReply,

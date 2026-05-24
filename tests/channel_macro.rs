@@ -107,6 +107,9 @@ use message::{
     Reply as MessageReply,
 };
 use owner_message::Operation as OwnerMessageOperation;
+use std::future::Future;
+use std::sync::Arc;
+use std::task::{Context, Poll, Wake, Waker};
 
 signal_frame::signal_cli! {
     pub struct MessageCommandLineDispatch {
@@ -127,6 +130,47 @@ fn encode_to_text<T: NotaEncode>(value: &T) -> String {
     let mut encoder = nota_codec::Encoder::new();
     value.encode(&mut encoder).expect("encode");
     encoder.into_string()
+}
+
+fn block_on_ready<Output>(future: impl Future<Output = Output>) -> Output {
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut context = Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    match future.as_mut().poll(&mut context) {
+        Poll::Ready(output) => output,
+        Poll::Pending => panic!("test future unexpectedly yielded"),
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum MessageDispatchError {
+    #[error(transparent)]
+    Dispatch(#[from] signal_frame::OperationDispatchError),
+}
+
+#[derive(Default)]
+struct MessageHandler {
+    handled: Vec<MessageOperationKind>,
+}
+
+impl message::OperationHandler for MessageHandler {
+    type Error = MessageDispatchError;
+
+    async fn handle_submit(&mut self, _payload: Submission) -> Result<MessageReply, Self::Error> {
+        self.handled.push(MessageOperationKind::Submit);
+        Ok(MessageReply::Accepted(Receipt { accepted: true }))
+    }
+
+    async fn handle_query(&mut self, _payload: InboxQuery) -> Result<MessageReply, Self::Error> {
+        self.handled.push(MessageOperationKind::Query);
+        Ok(MessageReply::Inbox(Inbox { count: 1 }))
+    }
 }
 
 #[test]
@@ -186,6 +230,49 @@ fn macro_emits_log_variant_for_operation_short_headers() {
         MessageOperation::kind_from_short_header(ShortHeader::new(99)),
         None
     );
+}
+
+#[test]
+fn macro_emits_operation_dispatch_handler_surface() {
+    use message::OperationDispatch;
+
+    let mut handler = MessageHandler::default();
+
+    let reply = block_on_ready(handler.dispatch(
+        ShortHeader::new(0),
+        MessageOperation::Submit(Submission::new("hello")),
+    ))
+    .expect("dispatch");
+
+    assert_eq!(handler.handled, vec![MessageOperationKind::Submit]);
+    assert_eq!(reply, MessageReply::Accepted(Receipt { accepted: true }));
+
+    let mismatch = block_on_ready(handler.dispatch(
+        ShortHeader::new(1),
+        MessageOperation::Submit(Submission::new("wrong header")),
+    ))
+    .expect_err("mismatched short header is rejected");
+    assert!(matches!(
+        mismatch,
+        MessageDispatchError::Dispatch(
+            signal_frame::OperationDispatchError::HeaderOperationMismatch {
+                expected: 1,
+                actual: 0
+            }
+        )
+    ));
+
+    let unknown = block_on_ready(handler.dispatch(
+        ShortHeader::new(99),
+        MessageOperation::Submit(Submission::new("unknown header")),
+    ))
+    .expect_err("unknown short header is rejected");
+    assert!(matches!(
+        unknown,
+        MessageDispatchError::Dispatch(
+            signal_frame::OperationDispatchError::UnknownOperationRoot { root: 99 }
+        )
+    ));
 }
 
 #[test]
