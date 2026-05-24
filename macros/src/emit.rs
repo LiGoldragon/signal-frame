@@ -674,6 +674,18 @@ fn field_name_for_type(parent: &str, schema_type: &SchemaType) -> Option<String>
     if parent == "RecordCaptured" && name == "RecordSummary" {
         return Some("record".to_string());
     }
+    if parent == "RecordProvenance" && name == "RecordSummary" {
+        return Some("summary".to_string());
+    }
+    if parent == "SubscriptionOpened" && name == "SubscriptionToken" {
+        return Some("token".to_string());
+    }
+    if parent == "SubscriptionOpened" && name == "SubscriptionSnapshot" {
+        return Some("snapshot".to_string());
+    }
+    if parent == "SubscriptionRetracted" && name == "SubscriptionToken" {
+        return Some("token".to_string());
+    }
     if (parent == "RecordQuery" || parent == "RecordSubscription") && name == "ObservationMode" {
         return Some("mode".to_string());
     }
