@@ -18,16 +18,36 @@ pub(crate) fn read_default_schema() -> syn::Result<ChannelSpec> {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").map_err(|error| {
         syn::Error::new(
             Span::call_site(),
-            format!("cannot read CARGO_MANIFEST_DIR for schema.nota: {error}"),
+            format!("cannot read CARGO_MANIFEST_DIR for schema file: {error}"),
         )
     })?;
-    // DESIGN-DECISION-REVIEW (designer/320 §2.3): schema.nota at
-    // repo root, not src/. Alternative: src/schema.nota. Revisit if
-    // Cargo.toml manifest discovery becomes complicated.
     let root = PathBuf::from(manifest);
-    let path = root.join("schema.nota");
+    let path = default_schema_path(&root);
     let schema = SchemaReader::new(root).read_schema(&path)?;
     schema.into_channel_spec()
+}
+
+fn default_schema_path(root: &Path) -> PathBuf {
+    let package = std::env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "signal".to_string());
+    let stem = schema_file_stem_from_package(&package);
+    let schema_path = root.join(format!("{stem}.schema"));
+    if schema_path.exists() {
+        return schema_path;
+    }
+
+    // Compatibility path for the first schema-MVP landing. New
+    // contract schemas use `<component>.schema`.
+    root.join("schema.nota")
+}
+
+fn schema_file_stem_from_package(package: &str) -> String {
+    package
+        .strip_prefix("owner-signal-persona-")
+        .or_else(|| package.strip_prefix("signal-persona-"))
+        .or_else(|| package.strip_prefix("owner-signal-"))
+        .or_else(|| package.strip_prefix("signal-"))
+        .unwrap_or(package)
+        .to_string()
 }
 
 struct SchemaReader {
@@ -140,26 +160,193 @@ impl<'input> SchemaParser<'input> {
     }
 
     fn parse(&mut self) -> syn::Result<ResolvedSchema> {
-        match self.decoder.peek_token().map_err(to_syn_error)? {
-            Some(Token::LBracket) => self.parse_flat_vector_schema(),
+        let schema = match self.decoder.peek_token().map_err(to_syn_error)? {
+            Some(Token::LBracket) => self.parse_vector_schema(),
             Some(Token::LParen) => self.parse_struct_schema(),
             Some(token) => Err(syn::Error::new(
                 Span::call_site(),
                 format!("expected schema record or legacy definition vector, got `{token:?}`"),
             )),
             None => Err(syn::Error::new(Span::call_site(), "schema is empty")),
+        }?;
+
+        if let Some(token) = self.decoder.peek_token().map_err(to_syn_error)? {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                format!("unexpected trailing schema token `{token:?}`"),
+            ));
+        }
+        Ok(schema)
+    }
+
+    fn parse_vector_schema(&mut self) -> syn::Result<ResolvedSchema> {
+        self.decoder.expect_seq_start().map_err(to_syn_error)?;
+        if self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            self.decoder.expect_seq_end().map_err(to_syn_error)?;
+            return self.parse_schema_after_operation_header(Vec::new());
+        }
+
+        if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
+            self.decoder.expect_record_start().map_err(to_syn_error)?;
+            let name = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
+            if is_channel_section_name(&name) {
+                return self.parse_legacy_vector_schema_after_first_section(name);
+            }
+
+            let first_variant = self.parse_variant_after_name(name)?;
+            let variants = self.parse_variant_vector_after_first(first_variant)?;
+            return self.parse_schema_after_operation_header(variants);
+        }
+
+        let first_variant = self.parse_variant()?;
+        let variants = self.parse_variant_vector_after_first(first_variant)?;
+        self.parse_schema_after_operation_header(variants)
+    }
+
+    fn parse_legacy_vector_schema_after_first_section(
+        &mut self,
+        first_name: String,
+    ) -> syn::Result<ResolvedSchema> {
+        let mut definitions = BTreeMap::new();
+        self.parse_channel_section_item(first_name, &mut definitions)?;
+        while !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            self.decoder.expect_record_start().map_err(to_syn_error)?;
+            let name = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
+            self.parse_channel_section_item(name, &mut definitions)?;
+        }
+        self.decoder.expect_seq_end().map_err(to_syn_error)?;
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::LBrace)
+        ) {
+            for (name, definition) in self.parse_namespace_map()? {
+                definitions.insert(name, definition);
+            }
+        }
+        Ok(ResolvedSchema { definitions })
+    }
+
+    fn parse_schema_after_operation_header(
+        &mut self,
+        operation_variants: Vec<ResolvedVariant>,
+    ) -> syn::Result<ResolvedSchema> {
+        let mut definitions = BTreeMap::from([(
+            "Operation".to_string(),
+            ResolvedDefinition {
+                name: "Operation".to_string(),
+                variants: operation_variants,
+                path_ref: None,
+            },
+        )]);
+
+        match self.decoder.peek_token().map_err(to_syn_error)? {
+            Some(Token::LBracket) => {
+                self.parse_unused_header_vector()?;
+                self.parse_unused_header_vector()?;
+
+                for (name, definition) in self.parse_namespace_map()? {
+                    definitions.insert(name, definition);
+                }
+                let known_names = definitions.keys().cloned().collect::<BTreeSet<_>>();
+                for (name, definition) in self.parse_namespace_map_with_known(&known_names)? {
+                    definitions.insert(name, definition);
+                }
+
+                if matches!(
+                    self.decoder.peek_token().map_err(to_syn_error)?,
+                    Some(Token::LBracket)
+                ) {
+                    for (name, definition) in self.parse_feature_vector()? {
+                        definitions.insert(name, definition);
+                    }
+                }
+                Ok(ResolvedSchema { definitions })
+            }
+            Some(Token::LBrace) => {
+                for (name, definition) in self.parse_namespace_map()? {
+                    definitions.insert(name, definition);
+                }
+                Ok(ResolvedSchema { definitions })
+            }
+            _ => Ok(ResolvedSchema { definitions }),
         }
     }
 
-    fn parse_flat_vector_schema(&mut self) -> syn::Result<ResolvedSchema> {
+    fn parse_variant_vector_after_first(
+        &mut self,
+        first: ResolvedVariant,
+    ) -> syn::Result<Vec<ResolvedVariant>> {
+        let mut variants = vec![first];
+        while !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            variants.push(self.parse_variant()?);
+        }
+        self.decoder.expect_seq_end().map_err(to_syn_error)?;
+        Ok(variants)
+    }
+
+    fn parse_unused_header_vector(&mut self) -> syn::Result<()> {
+        self.decoder.expect_seq_start().map_err(to_syn_error)?;
+        while !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            let _ = self.parse_variant()?;
+        }
+        self.decoder.expect_seq_end().map_err(to_syn_error)?;
+        Ok(())
+    }
+
+    fn parse_feature_vector(&mut self) -> syn::Result<BTreeMap<String, ResolvedDefinition>> {
         self.decoder.expect_seq_start().map_err(to_syn_error)?;
         let mut definitions = BTreeMap::new();
         while !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
-            let definition = self.parse_definition()?;
-            definitions.insert(definition.name.clone(), definition);
+            self.decoder.expect_record_start().map_err(to_syn_error)?;
+            let name = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
+            match name.as_str() {
+                "Reply" => {
+                    let definition = self.parse_reply_feature_body()?;
+                    definitions.insert(definition.name.clone(), definition);
+                }
+                "Event" => {
+                    let definition = self.parse_event_feature_body()?;
+                    definitions.insert(definition.name.clone(), definition);
+                }
+                "Observable" | "Storage" => self.skip_record_body()?,
+                other => {
+                    return Err(syn::Error::new(
+                        Span::call_site(),
+                        format!("unknown schema feature `{other}`"),
+                    ));
+                }
+            }
         }
         self.decoder.expect_seq_end().map_err(to_syn_error)?;
-        Ok(ResolvedSchema { definitions })
+        Ok(definitions)
+    }
+
+    fn parse_channel_section_item(
+        &mut self,
+        name: String,
+        definitions: &mut BTreeMap<String, ResolvedDefinition>,
+    ) -> syn::Result<()> {
+        match name.as_str() {
+            "Operation" | "Reply" | "Event" => {
+                let definition = self.parse_definition_body(name)?;
+                definitions.insert(definition.name.clone(), definition);
+            }
+            "Observable" => self.skip_record_body()?,
+            _ => {
+                let definition = self.parse_definition_body(name)?;
+                definitions.insert(definition.name.clone(), definition);
+            }
+        }
+        Ok(())
     }
 
     fn parse_struct_schema(&mut self) -> syn::Result<ResolvedSchema> {
@@ -257,6 +444,13 @@ impl<'input> SchemaParser<'input> {
     }
 
     fn parse_namespace_map(&mut self) -> syn::Result<BTreeMap<String, ResolvedDefinition>> {
+        self.parse_namespace_map_with_known(&BTreeSet::new())
+    }
+
+    fn parse_namespace_map_with_known(
+        &mut self,
+        extra_known_names: &BTreeSet<String>,
+    ) -> syn::Result<BTreeMap<String, ResolvedDefinition>> {
         self.decoder.expect_map_start().map_err(to_syn_error)?;
         let mut raw_definitions = BTreeMap::new();
         while !self.decoder.peek_is_map_end().map_err(to_syn_error)? {
@@ -267,7 +461,8 @@ impl<'input> SchemaParser<'input> {
         }
         self.decoder.expect_map_end().map_err(to_syn_error)?;
 
-        let known_names = raw_definitions.keys().cloned().collect::<BTreeSet<_>>();
+        let mut known_names = extra_known_names.clone();
+        known_names.extend(raw_definitions.keys().cloned());
         raw_definitions
             .into_iter()
             .map(|(name, definition)| {
@@ -283,11 +478,14 @@ impl<'input> SchemaParser<'input> {
             self.decoder.peek_token().map_err(to_syn_error)?,
             Some(Token::LBracket)
         ) {
-            let path_ref = self.decoder.read_path().map_err(to_syn_error)?;
+            let variants = self.parse_namespace_enum_items()?;
             return Ok(RawNamespaceDefinition {
                 name,
-                items: Vec::new(),
-                path_ref: Some(path_ref),
+                items: variants
+                    .into_iter()
+                    .map(RawNamespaceItem::Variant)
+                    .collect(),
+                path_ref: None,
             });
         }
 
@@ -299,11 +497,14 @@ impl<'input> SchemaParser<'input> {
         }
 
         self.decoder.expect_record_start().map_err(to_syn_error)?;
-        let declaration_name = self
-            .decoder
-            .read_pascal_identifier()
-            .map_err(to_syn_error)?;
-        if declaration_name == "Path" {
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::Ident(ref token)) if token == "Path"
+        ) {
+            let _ = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
             let path_ref = self.decoder.read_path().map_err(to_syn_error)?;
             self.decoder.expect_record_end().map_err(to_syn_error)?;
             return Ok(RawNamespaceDefinition {
@@ -312,20 +513,25 @@ impl<'input> SchemaParser<'input> {
                 path_ref: Some(path_ref),
             });
         }
-        if declaration_name != name {
+        let first_type = self.parse_type()?;
+        if matches!(&first_type, ResolvedType::Named(type_name) if type_name == &name) {
             return Err(syn::Error::new(
                 Span::call_site(),
                 format!(
-                    "schema namespace key `{}` does not match declaration `{}`",
-                    name, declaration_name
+                    "schema namespace entry `{name}` must not restate its key inside the value"
                 ),
             ));
         }
 
-        let mut items = Vec::new();
+        let mut items = vec![RawNamespaceItem::Type(first_type)];
         while !self.decoder.peek_is_record_end().map_err(to_syn_error)? {
             if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
-                items.push(RawNamespaceItem::Variant(self.parse_variant()?));
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!(
+                        "schema struct declaration `{name}` cannot contain data-carrying enum variants"
+                    ),
+                ));
             } else {
                 items.push(RawNamespaceItem::Type(self.parse_type()?));
             }
@@ -339,13 +545,14 @@ impl<'input> SchemaParser<'input> {
         })
     }
 
-    fn parse_definition(&mut self) -> syn::Result<ResolvedDefinition> {
-        self.decoder.expect_record_start().map_err(to_syn_error)?;
-        let name = self
-            .decoder
-            .read_pascal_identifier()
-            .map_err(to_syn_error)?;
-        self.parse_definition_body(name)
+    fn parse_namespace_enum_items(&mut self) -> syn::Result<Vec<ResolvedVariant>> {
+        self.decoder.expect_seq_start().map_err(to_syn_error)?;
+        let mut variants = Vec::new();
+        while !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            variants.push(self.parse_variant()?);
+        }
+        self.decoder.expect_seq_end().map_err(to_syn_error)?;
+        Ok(variants)
     }
 
     fn parse_definition_body(&mut self, name: String) -> syn::Result<ResolvedDefinition> {
@@ -371,6 +578,83 @@ impl<'input> SchemaParser<'input> {
             name,
             variants,
             path_ref: None,
+        })
+    }
+
+    fn parse_reply_feature_body(&mut self) -> syn::Result<ResolvedDefinition> {
+        let mut variants = Vec::new();
+        while !self.decoder.peek_is_record_end().map_err(to_syn_error)? {
+            variants.push(self.parse_bare_payload_variant(None)?);
+        }
+        self.decoder.expect_record_end().map_err(to_syn_error)?;
+        Ok(ResolvedDefinition {
+            name: "Reply".to_string(),
+            variants,
+            path_ref: None,
+        })
+    }
+
+    fn parse_event_feature_body(&mut self) -> syn::Result<ResolvedDefinition> {
+        let mut belongs = None;
+        if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
+            self.decoder.expect_record_start().map_err(to_syn_error)?;
+            let head = self.decoder.read_string().map_err(to_syn_error)?;
+            if head == "belongs" {
+                belongs = Some(
+                    self.decoder
+                        .read_pascal_identifier()
+                        .map_err(to_syn_error)?,
+                );
+                self.decoder.expect_record_end().map_err(to_syn_error)?;
+            } else {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!("expected Event annotation `(belongs Stream)`, got `({head} ...)`"),
+                ));
+            }
+        }
+
+        let mut variants = Vec::new();
+        while !self.decoder.peek_is_record_end().map_err(to_syn_error)? {
+            variants.push(self.parse_bare_payload_variant(belongs.clone())?);
+        }
+        self.decoder.expect_record_end().map_err(to_syn_error)?;
+        Ok(ResolvedDefinition {
+            name: "Event".to_string(),
+            variants,
+            path_ref: None,
+        })
+    }
+
+    fn parse_bare_payload_variant(
+        &mut self,
+        block_belongs: Option<String>,
+    ) -> syn::Result<ResolvedVariant> {
+        if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
+            let mut variant = self.parse_variant()?;
+            if let (
+                Some(stream),
+                ResolvedVariant::Data {
+                    belongs: variant_belongs,
+                    ..
+                },
+            ) = (&block_belongs, &mut variant)
+            {
+                if variant_belongs.is_none() {
+                    *variant_belongs = Some(stream.clone());
+                }
+            }
+            return Ok(variant);
+        }
+
+        let name = self
+            .decoder
+            .read_pascal_identifier()
+            .map_err(to_syn_error)?;
+        Ok(ResolvedVariant::Data {
+            name: name.clone(),
+            fields: vec![ResolvedType::Named(name)],
+            belongs: block_belongs,
         })
     }
 
@@ -432,49 +716,32 @@ impl<'input> SchemaParser<'input> {
                 .decoder
                 .read_pascal_identifier()
                 .map_err(to_syn_error)?;
+            self.parse_variant_after_name(name)
+        } else {
+            let name = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
+            Ok(ResolvedVariant::Unit { name })
+        }
+    }
+
+    fn parse_variant_after_name(&mut self, name: String) -> syn::Result<ResolvedVariant> {
+        if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
+            self.decoder.expect_record_start().map_err(to_syn_error)?;
+            let field_name = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
             if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
-                self.decoder.expect_record_start().map_err(to_syn_error)?;
-                let field_name = self
-                    .decoder
-                    .read_pascal_identifier()
-                    .map_err(to_syn_error)?;
-                if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
-                    self.parse_engine_annotation()?;
-                    self.decoder.expect_record_end().map_err(to_syn_error)?;
-                    self.decoder.expect_record_end().map_err(to_syn_error)?;
-                    return Ok(ResolvedVariant::Data {
-                        name,
-                        fields: vec![ResolvedType::Named(field_name)],
-                        belongs: None,
-                    });
-                }
-                if matches!(
-                    self.decoder.peek_token().map_err(to_syn_error)?,
-                    Some(Token::Ident(ref token)) if token == "belongs"
-                ) {
-                    let marker = self.decoder.read_string().map_err(to_syn_error)?;
-                    if marker != "belongs" {
-                        return Err(syn::Error::new(
-                            Span::call_site(),
-                            format!("expected belongs marker, got `{marker}`"),
-                        ));
-                    }
-                    let stream = self
-                        .decoder
-                        .read_pascal_identifier()
-                        .map_err(to_syn_error)?;
-                    self.decoder.expect_record_end().map_err(to_syn_error)?;
-                    self.decoder.expect_record_end().map_err(to_syn_error)?;
-                    return Ok(ResolvedVariant::Data {
-                        name,
-                        fields: vec![ResolvedType::Named(field_name)],
-                        belongs: Some(stream),
-                    });
-                }
-                return Err(syn::Error::new(
-                    Span::call_site(),
-                    "nested schema variant records are only supported for `(Payload belongs Stream)`",
-                ));
+                self.parse_engine_annotation()?;
+                self.decoder.expect_record_end().map_err(to_syn_error)?;
+                self.decoder.expect_record_end().map_err(to_syn_error)?;
+                return Ok(ResolvedVariant::Data {
+                    name,
+                    fields: vec![ResolvedType::Named(field_name)],
+                    belongs: None,
+                });
             }
             if matches!(
                 self.decoder.peek_token().map_err(to_syn_error)?,
@@ -493,29 +760,52 @@ impl<'input> SchemaParser<'input> {
                     .map_err(to_syn_error)?;
                 self.decoder.expect_record_end().map_err(to_syn_error)?;
                 return Ok(ResolvedVariant::Data {
-                    name: name.clone(),
-                    fields: vec![ResolvedType::Named(name)],
+                    name,
+                    fields: vec![ResolvedType::Named(field_name)],
                     belongs: Some(stream),
                 });
             }
-
-            let mut fields = Vec::new();
-            while !self.decoder.peek_is_record_end().map_err(to_syn_error)? {
-                fields.push(self.parse_type()?);
-            }
             self.decoder.expect_record_end().map_err(to_syn_error)?;
-            Ok(ResolvedVariant::Data {
+            self.decoder.expect_record_end().map_err(to_syn_error)?;
+            return Ok(ResolvedVariant::Data {
                 name,
-                fields,
+                fields: vec![ResolvedType::Named(field_name)],
                 belongs: None,
-            })
-        } else {
-            let name = self
+            });
+        }
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::Ident(ref token)) if token == "belongs"
+        ) {
+            let marker = self.decoder.read_string().map_err(to_syn_error)?;
+            if marker != "belongs" {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!("expected belongs marker, got `{marker}`"),
+                ));
+            }
+            let stream = self
                 .decoder
                 .read_pascal_identifier()
                 .map_err(to_syn_error)?;
-            Ok(ResolvedVariant::Unit { name })
+            self.decoder.expect_record_end().map_err(to_syn_error)?;
+            return Ok(ResolvedVariant::Data {
+                name: name.clone(),
+                fields: vec![ResolvedType::Named(name)],
+                belongs: Some(stream),
+            });
         }
+
+        let mut fields = Vec::new();
+        while !self.decoder.peek_is_record_end().map_err(to_syn_error)? {
+            fields.push(self.parse_type()?);
+        }
+        self.decoder.expect_record_end().map_err(to_syn_error)?;
+        Ok(ResolvedVariant::Data {
+            name,
+            fields,
+            belongs: None,
+        })
     }
 
     fn parse_engine_annotation(&mut self) -> syn::Result<()> {
@@ -990,6 +1280,10 @@ fn is_schema_primitive(name: &str) -> bool {
     )
 }
 
+fn is_channel_section_name(name: &str) -> bool {
+    matches!(name, "Operation" | "Reply" | "Event" | "Observable")
+}
+
 fn to_pascal_case(value: &str) -> String {
     let mut result = String::new();
     let mut uppercase = true;
@@ -1024,23 +1318,17 @@ mod tests {
                   (Observe Observation)
                   (Unwatch SubscriptionToken))
                 (Reply
-                  (RecordAccepted RecordAccepted))
-                (Event
-                  (RecordCaptured (RecordCaptured belongs DomainStream)))
-                (Observable
-                  (filter default)
-                  (operation_event OperationReceived)
-                  (effect_event EffectEmitted)))
+                  (RecordAccepted RecordAccepted)))
               (Namespace
                 {
-                  Entry (Entry Topic)
-                  Topic (Topic String)
-                  Observation (Observation State)
-                  State (State String)
-                  RecordAccepted (RecordAccepted RecordIdentifier)
-                  RecordIdentifier (RecordIdentifier u64)
-                  RecordCaptured (RecordCaptured RecordAccepted)
-                  SubscriptionToken (SubscriptionToken u64)
+                  Entry (Topic)
+                  Topic (String)
+                  Observation [State]
+                  State (String)
+                  RecordAccepted (RecordIdentifier)
+                  RecordIdentifier (u64)
+                  RecordCaptured (RecordAccepted)
+                  SubscriptionToken (u64)
                 }))
         "#;
 
@@ -1048,45 +1336,51 @@ mod tests {
         let schema = parser.parse().expect("schema parses");
         assert!(schema.definitions.contains_key("Operation"));
         assert!(schema.definitions.contains_key("Reply"));
-        assert!(schema.definitions.contains_key("Event"));
         assert!(schema.definitions.contains_key("Entry"));
 
         let channel = schema.into_channel_spec().expect("channel spec");
         assert_eq!(channel.request.variants[0].variant_name, "Record");
-        assert_eq!(
-            channel.streams[0].events,
-            vec![Ident::new("RecordCaptured", Span::call_site())]
-        );
+        assert!(channel.streams.is_empty());
     }
 
     #[test]
-    fn parses_positional_schema_record_with_namespace_map() {
+    fn parses_schema_file_body_with_header_vectors_and_namespace_map() {
         let text = r#"
-            (
-              (
-                (Operation
-                  (Record (Entry (engine assert)))
-                  (Observe Observation)
-                  (Unwatch SubscriptionToken))
-                (Reply
-                  (RecordAccepted RecordAccepted))
-                (Event
-                  (RecordCaptured (RecordCaptured belongs DomainStream)))
-                (Observable
-                  (filter default)
-                  (operation_event OperationReceived)
-                  (effect_event EffectEmitted)))
-              {
-                Magnitude (Path schemas/signal-sema/magnitude.schema.nota)
-                Entry (Entry Topic Magnitude)
-                Topic (Topic String)
-                Observation (Observation State)
-                State (State String)
-                RecordAccepted (RecordAccepted RecordIdentifier)
-                RecordIdentifier (RecordIdentifier u64)
-                RecordCaptured (RecordCaptured RecordAccepted)
-                SubscriptionToken (SubscriptionToken u64)
-              })
+            [
+              (Record (Entry (engine assert)))
+              (Observe (Observation (engine match)))
+              (Unwatch (SubscriptionToken (engine retract)))
+            ]
+
+            []
+
+            []
+
+            {
+              Magnitude (Path schemas/signal-sema/magnitude.schema)
+            }
+
+            {
+              Kind [Decision Principle Correction Clarification Constraint]
+              Entry (Topic Kind Magnitude)
+              Topic (String)
+              Observation [State (Records RecordQuery) Topics]
+              RecordQuery ([Option Topic] [Option Kind])
+              State (String)
+              RecordAccepted (RecordIdentifier)
+              RecordIdentifier (u64)
+              RecordCaptured (RecordAccepted)
+              SubscriptionToken (u64)
+            }
+
+            [
+              (Reply RecordAccepted)
+              (Event (belongs DomainStream) RecordCaptured)
+              (Observable
+                (filter default)
+                (operation_event OperationReceived)
+                (effect_event EffectEmitted))
+            ]
         "#;
 
         let mut parser = SchemaParser::new(text);
@@ -1097,16 +1391,33 @@ mod tests {
                 .definitions
                 .get("Magnitude")
                 .and_then(|definition| definition.path_ref.as_deref()),
-            Some("schemas/signal-sema/magnitude.schema.nota")
+            Some("schemas/signal-sema/magnitude.schema")
         );
+        assert!(matches!(
+            &schema.definitions["Kind"].variants[..],
+            [
+                ResolvedVariant::Unit { name: decision },
+                ResolvedVariant::Unit { name: principle },
+                ..
+            ] if decision == "Decision" && principle == "Principle"
+        ));
+        assert!(matches!(
+            &schema.definitions["Entry"].variants[..],
+            [ResolvedVariant::Data { name, fields, .. }]
+                if name == "Entry" && fields.len() == 3
+        ));
 
         let channel = schema.into_channel_spec().expect("channel spec");
         assert_eq!(channel.request.variants[0].variant_name, "Record");
         assert_eq!(channel.reply.variants[0].variant_name, "RecordAccepted");
+        assert_eq!(
+            channel.streams[0].events,
+            vec![Ident::new("RecordCaptured", Span::call_site())]
+        );
     }
 
     #[test]
-    fn namespace_map_rejects_mismatched_declaration_name() {
+    fn namespace_map_rejects_repeated_key_inside_struct_value() {
         let text = r#"
             (Schema
               (Channel
@@ -1114,19 +1425,45 @@ mod tests {
                 (Reply (RecordAccepted RecordAccepted)))
               (Namespace
                 {
-                  Entry (WrongName Topic)
+                  Entry (Entry Topic)
                 }))
         "#;
 
         let mut parser = SchemaParser::new(text);
         let error = match parser.parse() {
-            Ok(_) => panic!("mismatched declaration accepted"),
+            Ok(_) => panic!("repeated declaration key accepted"),
             Err(error) => error,
         };
         assert!(
             error
                 .to_string()
-                .contains("schema namespace key `Entry` does not match declaration `WrongName`")
+                .contains("schema namespace entry `Entry` must not restate its key")
+        );
+    }
+
+    #[test]
+    fn schema_file_body_rejects_trailing_tokens() {
+        let text = r#"
+            []
+            []
+            []
+            {}
+            {
+              Entry (String)
+            }
+            []
+            Extra
+        "#;
+
+        let mut parser = SchemaParser::new(text);
+        let error = match parser.parse() {
+            Ok(_) => panic!("trailing schema token accepted"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("unexpected trailing schema token")
         );
     }
 }
