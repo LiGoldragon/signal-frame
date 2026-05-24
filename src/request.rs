@@ -19,6 +19,8 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
 use crate::caller::Caller;
+use crate::frame::ShortHeader;
+use crate::log_variant::LogVariant;
 use crate::non_empty::{NonEmpty, NonEmptyError};
 
 /// One or more contract payloads that commit (or abort) as one unit.
@@ -70,6 +72,20 @@ impl<Payload> Request<Payload> {
             caller: None,
             payloads: NonEmpty::single(payload),
         }
+    }
+}
+
+impl<Payload> Request<Payload>
+where
+    Payload: LogVariant,
+{
+    /// Project this request into the frame short header.
+    ///
+    /// Multi-payload requests use the first operation as the Tier-1
+    /// dispatch triage key. The full ordered payload sequence remains in
+    /// the archived body.
+    pub fn short_header(&self) -> ShortHeader {
+        ShortHeader::new(self.payloads.head().log_variant())
     }
 }
 

@@ -2,8 +2,11 @@
 //! [`crate::validate`] / [`crate::emit`]. One `ChannelSpec` per
 //! `signal_channel!` invocation.
 
+use std::collections::BTreeMap;
+
 use syn::{Ident, Type};
 
+#[derive(Clone)]
 pub(crate) struct ChannelSpec {
     pub(crate) name: Ident,
     pub(crate) request: RequestBlockSpec,
@@ -11,23 +14,28 @@ pub(crate) struct ChannelSpec {
     pub(crate) event: Option<EventBlockSpec>,
     pub(crate) streams: Vec<StreamBlockSpec>,
     pub(crate) observable: Option<ObservableBlockSpec>,
+    pub(crate) schema: Option<SchemaSpec>,
 }
 
+#[derive(Clone)]
 pub(crate) struct RequestBlockSpec {
     pub(crate) name: Ident,
     pub(crate) variants: Vec<RequestVariantSpec>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ReplyBlockSpec {
     pub(crate) name: Ident,
     pub(crate) variants: Vec<ReplyVariantSpec>,
 }
 
+#[derive(Clone)]
 pub(crate) struct EventBlockSpec {
     pub(crate) name: Ident,
     pub(crate) variants: Vec<EventVariantSpec>,
 }
 
+#[derive(Clone)]
 pub(crate) struct StreamBlockSpec {
     pub(crate) name: Ident,
     pub(crate) token: Type,
@@ -36,17 +44,20 @@ pub(crate) struct StreamBlockSpec {
     pub(crate) close: Ident,
 }
 
+#[derive(Clone)]
 pub(crate) struct RequestVariantSpec {
     pub(crate) variant_name: Ident,
     pub(crate) payload_type: Type,
     pub(crate) opens: Option<Ident>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ReplyVariantSpec {
     pub(crate) variant_name: Ident,
     pub(crate) payload_type: Type,
 }
 
+#[derive(Clone)]
 pub(crate) struct EventVariantSpec {
     pub(crate) variant_name: Ident,
     pub(crate) payload_type: Type,
@@ -70,6 +81,7 @@ pub(crate) struct EventVariantSpec {
 /// `effect_event <Type>;` so the macro knows which event record maps
 /// to which publication moment (`publish_operation_received` vs
 /// `publish_effect_emitted`).
+#[derive(Clone)]
 pub(crate) struct ObservableBlockSpec {
     /// Filter declaration. Either the macro-generated closed-enum
     /// default (`filter default;`) or a contract-author-named type
@@ -94,9 +106,39 @@ pub(crate) struct ObservableBlockSpec {
 ///
 /// `Named` — contract author supplies the filter type and writes the
 /// `ObserverFilterMatch` impl against it.
+#[derive(Clone)]
 pub(crate) enum FilterDecl {
     Default,
     Named(Ident),
+}
+
+#[derive(Clone)]
+pub(crate) struct SchemaSpec {
+    pub(crate) definitions: BTreeMap<String, SchemaDefinition>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SchemaDefinition {
+    pub(crate) name: String,
+    pub(crate) variants: Vec<SchemaVariant>,
+}
+
+#[derive(Clone)]
+pub(crate) enum SchemaVariant {
+    Unit {
+        name: String,
+    },
+    Data {
+        name: String,
+        fields: Vec<SchemaType>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) enum SchemaType {
+    Named(String),
+    Vec(Box<SchemaType>),
+    Option(Box<SchemaType>),
 }
 
 impl ObservableBlockSpec {

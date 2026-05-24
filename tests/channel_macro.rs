@@ -2,8 +2,8 @@ use nota_codec::{NotaDecode, NotaEncode, NotaRecord};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
-    ObservableSet, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody, SubReply,
-    signal_channel,
+    ObservableSet, RequestPayload, SessionEpoch, ShortHeader, StreamingFrame, StreamingFrameBody,
+    SubReply, signal_channel,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -168,6 +168,16 @@ fn macro_emits_static_operation_heads_for_cli_dispatch() {
         <OwnerMessageOperation as signal_frame::SignalOperationHeads>::HEADS,
         &["Configure", "Drain"]
     );
+}
+
+#[test]
+fn macro_emits_log_variant_for_operation_short_headers() {
+    let submit = MessageOperation::Submit(Submission::new("hello"));
+    let query = MessageOperation::Query(InboxQuery::new("operator"));
+
+    assert_eq!(signal_frame::LogVariant::log_variant(&submit), 0);
+    assert_eq!(signal_frame::LogVariant::log_variant(&query), 1);
+    assert_eq!(query.into_request().short_header(), ShortHeader::new(1));
 }
 
 #[test]

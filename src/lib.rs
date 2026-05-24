@@ -24,6 +24,7 @@ pub mod error;
 pub mod exchange;
 pub mod frame;
 pub mod identity;
+pub mod log_variant;
 pub mod namespace;
 pub mod non_empty;
 pub mod observable;
@@ -48,6 +49,7 @@ pub use frame::{
     StreamingFrameBody, short_header_from_archive, short_header_from_length_prefixed,
 };
 pub use identity::{Revision, Slot};
+pub use log_variant::LogVariant;
 pub use namespace::{NamespaceSection, SECTION_CUTOFF};
 pub use non_empty::{NonEmpty, NonEmptyError};
 pub use observable::{ObservableSet, ObservationProjection};

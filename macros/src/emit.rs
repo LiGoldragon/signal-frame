@@ -10,7 +10,8 @@ use syn::parse_quote;
 
 use crate::model::{
     ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec, ReplyBlockSpec,
-    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, SchemaDefinition, SchemaSpec,
+    SchemaType, SchemaVariant, StreamBlockSpec,
 };
 
 pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
@@ -25,6 +26,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
     let event_enum = augmented.event.as_ref().map(emit_event_enum);
 
     let request_payload_impl = emit_request_payload_impl(&augmented.request);
+    let log_variant_impl = emit_log_variant_impl(&augmented);
     let request_kind = emit_request_kind(&augmented.request);
     let reply_kind = emit_reply_kind(&augmented.reply);
     let event_kind = augmented.event.as_ref().map(emit_event_kind);
@@ -36,6 +38,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
     };
 
     let frame_aliases = emit_frame_aliases(&augmented);
+    let frame_builders = emit_frame_builders(&augmented);
     let nota_codecs = emit_nota_codecs(&augmented);
 
     quote! {
@@ -43,11 +46,13 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
         #reply_enum
         #event_enum
         #request_payload_impl
+        #log_variant_impl
         #request_kind
         #reply_kind
         #event_kind
         #stream_kind
         #frame_aliases
+        #frame_builders
         #nota_codecs
         #observable_runtime
     }
@@ -156,6 +161,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         event,
         streams,
         observable: None,
+        schema: spec.schema.clone(),
     }
 }
 
@@ -187,6 +193,7 @@ fn clone_channel_spec(spec: &ChannelSpec) -> ChannelSpec {
         }),
         streams: clone_streams(&spec.streams),
         observable: None,
+        schema: spec.schema.clone(),
     }
 }
 
@@ -330,6 +337,255 @@ fn emit_request_payload_impl(block: &RequestBlockSpec) -> TokenStream {
             const HEADS: &'static [&'static str] = &[ #( #heads, )* ];
         }
     }
+}
+
+fn emit_log_variant_impl(spec: &ChannelSpec) -> TokenStream {
+    let name = &spec.request.name;
+    let arms = spec
+        .request
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(index, variant)| {
+            let variant_name = &variant.variant_name;
+            let index = index as u8;
+            let slots = spec
+                .schema
+                .as_ref()
+                .and_then(|schema| {
+                    type_name_from_syn(&variant.payload_type).map(|payload| (schema, payload))
+                })
+                .map(|(schema, payload)| {
+                    emit_slots_for_named_type(schema, &payload, quote!(payload), 1).tokens
+                })
+                .unwrap_or_else(TokenStream::new);
+            quote! {
+                Self::#variant_name(payload) => {
+                    bytes[0] = #index;
+                    let _ = payload;
+                    #slots
+                }
+            }
+        });
+    quote! {
+        impl ::signal_frame::LogVariant for #name {
+            fn log_variant(&self) -> u64 {
+                let mut bytes = [0u8; 8];
+                match self {
+                    #( #arms, )*
+                }
+                u64::from_le_bytes(bytes)
+            }
+        }
+    }
+}
+
+struct SlotEmission {
+    tokens: TokenStream,
+    next_slot: usize,
+}
+
+fn emit_slots_for_named_type(
+    schema: &SchemaSpec,
+    type_name: &str,
+    expression: TokenStream,
+    next_slot: usize,
+) -> SlotEmission {
+    if next_slot > 7 || is_primitive(type_name) {
+        return SlotEmission {
+            tokens: TokenStream::new(),
+            next_slot,
+        };
+    }
+    let Some(definition) = schema.definitions.get(type_name) else {
+        return SlotEmission {
+            tokens: TokenStream::new(),
+            next_slot,
+        };
+    };
+    if is_leaf_enum(definition) {
+        let slot = syn::Index::from(next_slot);
+        return SlotEmission {
+            tokens: quote! {
+                bytes[#slot] = #expression as u8;
+            },
+            next_slot: next_slot + 1,
+        };
+    }
+    if let Some(fields) = single_variant_fields(definition) {
+        return emit_struct_field_slots(schema, definition, fields, expression, next_slot);
+    }
+    emit_mixed_enum_slots(schema, definition, expression, next_slot)
+}
+
+fn emit_slots_for_schema_type(
+    schema: &SchemaSpec,
+    schema_type: &SchemaType,
+    expression: TokenStream,
+    next_slot: usize,
+) -> SlotEmission {
+    match schema_type {
+        SchemaType::Named(name) => emit_slots_for_named_type(schema, name, expression, next_slot),
+        SchemaType::Vec(_) | SchemaType::Option(_) => SlotEmission {
+            tokens: TokenStream::new(),
+            next_slot,
+        },
+    }
+}
+
+fn emit_struct_field_slots(
+    schema: &SchemaSpec,
+    definition: &SchemaDefinition,
+    fields: &[SchemaType],
+    expression: TokenStream,
+    mut next_slot: usize,
+) -> SlotEmission {
+    let mut tokens = TokenStream::new();
+    for schema_type in fields {
+        let Some(field_name) = field_name_for_type(&definition.name, schema_type) else {
+            continue;
+        };
+        let field_ident = format_ident!("{}", field_name);
+        let emission = emit_slots_for_schema_type(
+            schema,
+            schema_type,
+            quote!(#expression.#field_ident),
+            next_slot,
+        );
+        next_slot = emission.next_slot;
+        tokens.extend(emission.tokens);
+        if next_slot > 7 {
+            break;
+        }
+    }
+    SlotEmission { tokens, next_slot }
+}
+
+fn emit_mixed_enum_slots(
+    schema: &SchemaSpec,
+    definition: &SchemaDefinition,
+    expression: TokenStream,
+    next_slot: usize,
+) -> SlotEmission {
+    if next_slot > 7 {
+        return SlotEmission {
+            tokens: TokenStream::new(),
+            next_slot,
+        };
+    }
+    let enum_name = format_ident!("{}", definition.name);
+    let slot = syn::Index::from(next_slot);
+    let mut furthest_slot = next_slot + 1;
+    let arms = definition
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(index, variant)| match variant {
+            SchemaVariant::Unit { name } => {
+                let variant = format_ident!("{}", name);
+                let index = index as u8;
+                quote! {
+                    #enum_name::#variant => {
+                        bytes[#slot] = #index;
+                    }
+                }
+            }
+            SchemaVariant::Data { name, fields, .. } => {
+                let variant = format_ident!("{}", name);
+                let payload = format_ident!("payload_{}", next_slot);
+                let index = index as u8;
+                let nested = if fields.len() == 1 {
+                    let emission = emit_slots_for_schema_type(
+                        schema,
+                        &fields[0],
+                        quote!(#payload),
+                        next_slot + 1,
+                    );
+                    furthest_slot = furthest_slot.max(emission.next_slot);
+                    emission.tokens
+                } else {
+                    TokenStream::new()
+                };
+                quote! {
+                    #enum_name::#variant(#payload) => {
+                        bytes[#slot] = #index;
+                        #nested
+                    }
+                }
+            }
+        });
+
+    SlotEmission {
+        tokens: quote! {
+            match #expression {
+                #( #arms, )*
+            }
+        },
+        next_slot: furthest_slot,
+    }
+}
+
+fn is_leaf_enum(definition: &SchemaDefinition) -> bool {
+    definition
+        .variants
+        .iter()
+        .all(|variant| matches!(variant, SchemaVariant::Unit { .. }))
+}
+
+fn single_variant_fields(definition: &SchemaDefinition) -> Option<&[SchemaType]> {
+    match definition.variants.as_slice() {
+        [SchemaVariant::Data { name, fields, .. }] if name == &definition.name => Some(fields),
+        _ => None,
+    }
+}
+
+fn field_name_for_type(parent: &str, schema_type: &SchemaType) -> Option<String> {
+    let SchemaType::Named(name) = schema_type else {
+        return None;
+    };
+    // DESIGN-DECISION-REVIEW (designer/322 §3.4): type-only
+    // positional with field-name = type-name-lowercased default.
+    // Alternative: explicit (field-name type) override syntax.
+    // Revisit when a contract has multiple fields of the same
+    // primitive type and the default naming becomes ambiguous.
+    if parent == "Entry" && name == "Magnitude" {
+        return Some("certainty".to_string());
+    }
+    Some(to_snake_case(name))
+}
+
+fn is_primitive(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "String" | "u8" | "u16" | "u32" | "u64" | "bool" | "Date" | "Time" | "Bytes"
+    )
+}
+
+fn type_name_from_syn(ty: &syn::Type) -> Option<String> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    path.path
+        .segments
+        .last()
+        .map(|segment| segment.ident.to_string())
+}
+
+fn to_snake_case(name: &str) -> String {
+    let mut output = String::new();
+    for (index, character) in name.chars().enumerate() {
+        if character.is_uppercase() {
+            if index > 0 {
+                output.push('_');
+            }
+            for lower in character.to_lowercase() {
+                output.push(lower);
+            }
+        } else {
+            output.push(character);
+        }
+    }
+    output
 }
 
 fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
@@ -561,6 +817,22 @@ fn emit_frame_aliases(spec: &ChannelSpec) -> TokenStream {
             pub type #channel_request_alias = ::signal_frame::Request<#request_name>;
             pub type #channel_reply_alias = ::signal_frame::Reply<#reply_name>;
             pub type #channel_builder_alias = ::signal_frame::RequestBuilder<#request_name>;
+        }
+    }
+}
+
+fn emit_frame_builders(spec: &ChannelSpec) -> TokenStream {
+    let request_name = &spec.request.name;
+    quote! {
+        impl #request_name {
+            pub fn into_frame(
+                self,
+                exchange: ::signal_frame::ExchangeIdentifier,
+            ) -> Frame {
+                let request = ::signal_frame::Request::from_payload(self);
+                let short_header = request.short_header();
+                Frame::with_short_header(short_header, FrameBody::Request { exchange, request })
+            }
         }
     }
 }

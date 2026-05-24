@@ -14,8 +14,8 @@ use thiserror::Error;
 
 use crate::{
     Caller, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence,
-    NonEmpty, Reply, Request, RequestPayload, SessionEpoch, StreamingFrame, StreamingFrameBody,
-    SubReply,
+    LogVariant, NonEmpty, Reply, Request, RequestPayload, SessionEpoch, StreamingFrame,
+    StreamingFrameBody, SubReply,
 };
 
 type HighSerializer<'archive> = rkyv::api::high::HighSerializer<
@@ -484,7 +484,7 @@ pub trait ClientFrame: Sized {
 
 impl<Operation, ReplyPayload> ClientFrame for ExchangeFrame<Operation, ReplyPayload>
 where
-    Operation: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
+    Operation: Archive + Debug + LogVariant + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     <Operation as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
             rkyv::api::high::HighValidator<'archive, rkyv::rancor::Error>,
@@ -497,7 +497,11 @@ where
     type Reply = ReplyPayload;
 
     fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self {
-        Self::new(ExchangeFrameBody::Request { exchange, request })
+        let short_header = request.short_header();
+        Self::with_short_header(
+            short_header,
+            ExchangeFrameBody::Request { exchange, request },
+        )
     }
 
     fn reply_from_frame(self) -> Result<Reply<Self::Reply>, CommandLineError> {
@@ -523,7 +527,7 @@ where
 impl<Operation, ReplyPayload, EventPayload> ClientFrame
     for StreamingFrame<Operation, ReplyPayload, EventPayload>
 where
-    Operation: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
+    Operation: Archive + Debug + LogVariant + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     EventPayload: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     <Operation as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
@@ -540,7 +544,11 @@ where
     type Reply = ReplyPayload;
 
     fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self {
-        Self::new(StreamingFrameBody::Request { exchange, request })
+        let short_header = request.short_header();
+        Self::with_short_header(
+            short_header,
+            StreamingFrameBody::Request { exchange, request },
+        )
     }
 
     fn reply_from_frame(self) -> Result<Reply<Self::Reply>, CommandLineError> {

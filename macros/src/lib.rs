@@ -41,16 +41,29 @@
 mod emit;
 mod model;
 mod parse;
+mod schema_reader;
 mod validate;
 
 use proc_macro::TokenStream;
-use syn::parse_macro_input;
 
 use crate::model::ChannelSpec;
 
 #[proc_macro]
 pub fn signal_channel(input: TokenStream) -> TokenStream {
-    let spec = parse_macro_input!(input as ChannelSpec);
+    // DESIGN-DECISION-REVIEW (designer/320 §2.8): dual input mode.
+    // Alternative: separate nota_signal_channel! macro. Revisit if
+    // dual parsing complicates macro internals.
+    let spec = if input.to_string().trim_start().starts_with('[') {
+        match schema_reader::read_default_schema() {
+            Ok(spec) => spec,
+            Err(error) => return error.into_compile_error().into(),
+        }
+    } else {
+        match syn::parse::<ChannelSpec>(input) {
+            Ok(spec) => spec,
+            Err(error) => return error.into_compile_error().into(),
+        }
+    };
     if let Err(error) = validate::validate(&spec) {
         return error.into_compile_error().into();
     }
