@@ -591,6 +591,23 @@ macros/               sibling proc-macro crate
   README.md           macro grammar and validation witnesses
 ```
 
+## Macro-pattern integration
+
+**Status:** integrated into the brilliant macro library pattern per `reports/designer/326-v13-spirit-complete-schema-vision.md §3` (schemas as macro-pattern instance).
+
+**Role:** this crate is the wire kernel. It owns `Frame`, `ShortHeader`, `Caller`, the request/reply mechanics, and the streaming subscription envelope. Every component's wire surface is expressed in this kernel's types.
+
+**Integration target:** the wire kernel emitted Frame + ShortHeader + Caller; the macro emits `signal_channel!` invocations against this crate's types. Under the schema-engine upgrade, the `.schema` file replaces the hand-written `signal_channel!` body, but the emitted code still binds to `signal-frame`'s Frame / ShortHeader / dispatcher contracts — the kernel itself does not change shape; it is consumed by the schema-driven lowering rather than by hand-written macro calls.
+
+**References:**
+- `reports/designer/326-v13-spirit-complete-schema-vision.md` — schema language + macro pattern
+- `reports/designer/324-migration-mvp-spirit-handover-re-specification.md` — migration MVP
+- `reports/operator/174-schema-import-header-design-critique-2026-05-24.md` — lowering + AssembledSchema form
+
+### Sibling subcrate `signal-frame-macros`
+
+The `macros/` proc-macro subcrate is the brilliant macro library itself. Under the schema-engine upgrade it gains the schema reader + AssembledSchema lowering per `/326-v13` + `primary-ezqx.1`: instead of parsing a `signal_channel! { … }` body, the macro reads a sibling `<component>/<component>.schema` file, resolves cross-schema imports, lowers to `AssembledSchema`, and emits the same Frame / ShortHeader / dispatcher / Command-Effect / VersionProjection / storage descriptor code it does today. The proc-macro entrypoint shifts from `#[proc_macro]` body parser to `#[proc_macro]` schema-file reader; emit-side stays bound to `signal-frame`'s kernel types. Sequencing: schema reader lands as `primary-ezqx.1` MVP against Spirit; `signal_channel!` body form remains supported during the migration window.
+
 ## See Also
 
 - `/home/li/primary/skills/contract-repo.md` — workspace discipline
