@@ -410,6 +410,7 @@ impl<'input> SchemaParser<'input> {
                 if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
                     self.parse_engine_annotation()?;
                     self.decoder.expect_record_end().map_err(to_syn_error)?;
+                    self.decoder.expect_record_end().map_err(to_syn_error)?;
                     return Ok(ResolvedVariant::Data {
                         name,
                         fields: vec![ResolvedType::Named(field_name)],
@@ -989,7 +990,8 @@ mod tests {
               (Channel
                 (Operation
                   (Record (Entry (engine assert)))
-                  (Observe Observation))
+                  (Observe Observation)
+                  (Unwatch SubscriptionToken))
                 (Reply
                   (RecordAccepted RecordAccepted))
                 (Event
@@ -1007,6 +1009,7 @@ mod tests {
                   RecordAccepted (RecordAccepted RecordIdentifier)
                   RecordIdentifier (RecordIdentifier u64)
                   RecordCaptured (RecordCaptured RecordAccepted)
+                  SubscriptionToken (SubscriptionToken u64)
                 }))
         "#;
 
@@ -1039,7 +1042,10 @@ mod tests {
         "#;
 
         let mut parser = SchemaParser::new(text);
-        let error = parser.parse().expect_err("mismatched declaration rejected");
+        let error = match parser.parse() {
+            Ok(_) => panic!("mismatched declaration accepted"),
+            Err(error) => error,
+        };
         assert!(
             error
                 .to_string()
