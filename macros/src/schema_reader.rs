@@ -188,6 +188,40 @@ impl<'input> SchemaParser<'input> {
                 .decoder
                 .read_pascal_identifier()
                 .map_err(to_syn_error)?;
+            if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
+                self.decoder.expect_record_start().map_err(to_syn_error)?;
+                let field_name = self
+                    .decoder
+                    .read_pascal_identifier()
+                    .map_err(to_syn_error)?;
+                if matches!(
+                    self.decoder.peek_token().map_err(to_syn_error)?,
+                    Some(Token::Ident(ref token)) if token == "belongs"
+                ) {
+                    let marker = self.decoder.read_string().map_err(to_syn_error)?;
+                    if marker != "belongs" {
+                        return Err(syn::Error::new(
+                            Span::call_site(),
+                            format!("expected belongs marker, got `{marker}`"),
+                        ));
+                    }
+                    let stream = self
+                        .decoder
+                        .read_pascal_identifier()
+                        .map_err(to_syn_error)?;
+                    self.decoder.expect_record_end().map_err(to_syn_error)?;
+                    self.decoder.expect_record_end().map_err(to_syn_error)?;
+                    return Ok(ResolvedVariant::Data {
+                        name,
+                        fields: vec![ResolvedType::Named(field_name)],
+                        belongs: Some(stream),
+                    });
+                }
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "nested schema variant records are only supported for `(Payload belongs Stream)`",
+                ));
+            }
             if matches!(
                 self.decoder.peek_token().map_err(to_syn_error)?,
                 Some(Token::Ident(ref token)) if token == "belongs"
