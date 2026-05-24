@@ -754,7 +754,7 @@ impl<'input> SchemaParser<'input> {
             self.decoder.peek_token().map_err(to_syn_error)?,
             Some(Token::LBracket)
         ) {
-            let payload = self.parse_header_endpoint_vector(&name)?;
+            let payload = self.parse_bracket_variant_payload(&name)?;
             self.decoder.expect_record_end().map_err(to_syn_error)?;
             return Ok(ResolvedVariant::Data {
                 name,
@@ -844,7 +844,7 @@ impl<'input> SchemaParser<'input> {
         })
     }
 
-    fn parse_header_endpoint_vector(
+    fn parse_bracket_variant_payload(
         &mut self,
         variant_name: &str,
     ) -> syn::Result<ResolvedType> {
@@ -860,6 +860,16 @@ impl<'input> SchemaParser<'input> {
             .decoder
             .read_pascal_identifier()
             .map_err(to_syn_error)?;
+        if endpoint == "Vec" || endpoint == "Option" {
+            let inner = self.parse_type()?;
+            self.decoder.expect_seq_end().map_err(to_syn_error)?;
+            return match endpoint.as_str() {
+                "Vec" => Ok(ResolvedType::Vec(Box::new(inner))),
+                "Option" => Ok(ResolvedType::Option(Box::new(inner))),
+                _ => unreachable!(),
+            };
+        }
+
         if !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
             return Err(syn::Error::new(
                 Span::call_site(),
