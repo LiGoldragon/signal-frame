@@ -162,6 +162,7 @@ impl<'input> SchemaParser<'input> {
     fn parse(&mut self) -> syn::Result<ResolvedSchema> {
         let schema = match self.decoder.peek_token().map_err(to_syn_error)? {
             Some(Token::LBracket) => self.parse_vector_schema(),
+            Some(Token::LBrace) => self.parse_import_first_schema(),
             Some(Token::LParen) => self.parse_struct_schema(),
             Some(token) => Err(syn::Error::new(
                 Span::call_site(),
@@ -179,10 +180,41 @@ impl<'input> SchemaParser<'input> {
         Ok(schema)
     }
 
+    fn parse_import_first_schema(&mut self) -> syn::Result<ResolvedSchema> {
+        let mut definitions = self.parse_namespace_map()?;
+        let operation_variants = self.parse_header_vector()?;
+        definitions.insert(
+            "Operation".to_string(),
+            ResolvedDefinition {
+                name: "Operation".to_string(),
+                variants: operation_variants,
+                path_ref: None,
+                alias: None,
+            },
+        );
+
+        self.parse_unused_header_vector()?;
+        self.parse_unused_header_vector()?;
+
+        let known_names = definitions.keys().cloned().collect::<BTreeSet<_>>();
+        for (name, definition) in self.parse_namespace_map_with_known(&known_names)? {
+            definitions.insert(name, definition);
+        }
+
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::LBracket)
+        ) {
+            for (name, definition) in self.parse_feature_vector()? {
+                definitions.insert(name, definition);
+            }
+        }
+
+        Ok(ResolvedSchema { definitions })
+    }
+
     fn parse_vector_schema(&mut self) -> syn::Result<ResolvedSchema> {
-        self.decoder.expect_seq_start().map_err(to_syn_error)?;
-        if self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
-            self.decoder.expect_seq_end().map_err(to_syn_error)?;
+        if self.header_vector_is_empty()? {
             return self.parse_schema_after_operation_header(Vec::new());
         }
 
@@ -204,6 +236,26 @@ impl<'input> SchemaParser<'input> {
         let first_variant = self.parse_variant()?;
         let variants = self.parse_variant_vector_after_first(first_variant)?;
         self.parse_schema_after_operation_header(variants)
+    }
+
+    fn header_vector_is_empty(&mut self) -> syn::Result<bool> {
+        self.decoder.expect_seq_start().map_err(to_syn_error)?;
+        if self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            self.decoder.expect_seq_end().map_err(to_syn_error)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn parse_header_vector(&mut self) -> syn::Result<Vec<ResolvedVariant>> {
+        self.decoder.expect_seq_start().map_err(to_syn_error)?;
+        let mut variants = Vec::new();
+        while !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            variants.push(self.parse_variant()?);
+        }
+        self.decoder.expect_seq_end().map_err(to_syn_error)?;
+        Ok(variants)
     }
 
     fn parse_legacy_vector_schema_after_first_section(
@@ -1526,6 +1578,52 @@ mod tests {
             channel.streams[0].events,
             vec![Ident::new("RecordCaptured", Span::call_site())]
         );
+    }
+
+    #[test]
+    fn parses_schema_file_body_with_imports_first_and_explicit_payload_pairs() {
+        let text = r#"
+            {
+              Magnitude (Path schemas/signal-sema/magnitude.schema)
+            }
+
+            [
+              (Record Entry)
+              (Observe Observation)
+            ]
+
+            []
+
+            []
+
+            {
+              Kind [Decision Principle]
+              Entry (Topic Kind Magnitude)
+              Topic (String)
+              Observation [State]
+              State (String)
+              RecordAccepted (RecordIdentifier)
+              RecordIdentifier (u64)
+            }
+
+            [
+              (Reply RecordAccepted)
+            ]
+        "#;
+
+        let mut parser = SchemaParser::new(text);
+        let schema = parser.parse().expect("schema parses");
+        assert_eq!(
+            schema
+                .definitions
+                .get("Magnitude")
+                .and_then(|definition| definition.path_ref.as_deref()),
+            Some("schemas/signal-sema/magnitude.schema")
+        );
+
+        let channel = schema.into_channel_spec().expect("channel spec");
+        assert_eq!(channel.request.variants[0].variant_name, "Record");
+        assert_eq!(channel.reply.variants[0].variant_name, "RecordAccepted");
     }
 
     #[test]
