@@ -178,6 +178,14 @@ fn macro_emits_log_variant_for_operation_short_headers() {
     assert_eq!(signal_frame::LogVariant::log_variant(&submit), 0);
     assert_eq!(signal_frame::LogVariant::log_variant(&query), 1);
     assert_eq!(query.into_request().short_header(), ShortHeader::new(1));
+    assert_eq!(
+        MessageOperation::kind_from_short_header(ShortHeader::new(1)),
+        Some(MessageOperationKind::Query)
+    );
+    assert_eq!(
+        MessageOperation::kind_from_short_header(ShortHeader::new(99)),
+        None
+    );
 }
 
 #[test]

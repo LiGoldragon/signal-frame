@@ -605,6 +605,11 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
         let variant = &v.variant_name;
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
+    let header_arms = block.variants.iter().enumerate().map(|(index, v)| {
+        let index = index as u8;
+        let variant = &v.variant_name;
+        quote! { #index => Some(#kind_name::#variant) }
+    });
     quote! {
         #[derive(
             ::rkyv::Archive,
@@ -626,6 +631,15 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
             pub fn kind(&self) -> #kind_name {
                 match self {
                     #( #arms, )*
+                }
+            }
+
+            pub fn kind_from_short_header(
+                short_header: ::signal_frame::ShortHeader,
+            ) -> Option<#kind_name> {
+                match short_header.to_le_bytes()[0] {
+                    #( #header_arms, )*
+                    _ => None,
                 }
             }
         }
