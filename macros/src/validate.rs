@@ -35,11 +35,14 @@ fn validate_schema_roots(spec: &ChannelSpec) -> syn::Result<()> {
         ));
     }
     for definition in schema.definitions.values() {
-        if definition.variants.is_empty() {
+        if definition.variants.is_empty() && definition.alias.is_none() {
             return Err(Error::new_spanned(
                 &spec.name,
                 format!("schema enum `{}` has no variants", definition.name),
             ));
+        }
+        if let Some(alias) = &definition.alias {
+            validate_schema_type(schema, alias, &spec.name)?;
         }
         for variant in &definition.variants {
             if let SchemaVariant::Data { fields, .. } = variant {

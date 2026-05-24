@@ -17,6 +17,7 @@ proc-macro = true
 nota-codec  = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
 proc-macro2 = "1"
 quote       = "1"
+schema      = { git = "https://github.com/LiGoldragon/schema.git", branch = "main" }
 syn         = { version = "2", features = ["full", "extra-traits"] }
 
 [lints.rust]
