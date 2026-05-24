@@ -551,6 +551,12 @@ fn field_name_for_type(parent: &str, schema_type: &SchemaType) -> Option<String>
     if parent == "Entry" && name == "Magnitude" {
         return Some("certainty".to_string());
     }
+    if (parent == "RecordQuery" || parent == "RecordSubscription") && name == "ObservationMode" {
+        return Some("mode".to_string());
+    }
+    if parent == "Statement" && name == "StatementText" {
+        return Some("text".to_string());
+    }
     Some(to_snake_case(name))
 }
 
