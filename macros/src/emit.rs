@@ -490,6 +490,9 @@ fn emit_slots_for_named_type(
             next_slot,
         };
     };
+    if let Some(alias) = &definition.alias {
+        return emit_slots_for_schema_type(schema, alias, expression, next_slot);
+    }
     if is_leaf_enum(definition) {
         let slot = syn::Index::from(next_slot);
         return SlotEmission {

@@ -121,6 +121,7 @@ pub(crate) struct SchemaSpec {
 pub(crate) struct SchemaDefinition {
     pub(crate) name: String,
     pub(crate) variants: Vec<SchemaVariant>,
+    pub(crate) alias: Option<SchemaType>,
 }
 
 #[derive(Clone)]

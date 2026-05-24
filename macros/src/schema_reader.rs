@@ -94,7 +94,7 @@ impl SchemaReader {
             let replacement = external.definitions.get(&name).cloned().ok_or_else(|| {
                 syn::Error::new(
                     Span::call_site(),
-                    format!("schema path-ref `{path_ref}` did not define requested enum `{name}`"),
+                    format!("schema path-ref `{path_ref}` did not define requested type `{name}`"),
                 )
             })?;
             schema.definitions.insert(name, replacement);
@@ -242,6 +242,7 @@ impl<'input> SchemaParser<'input> {
                 name: "Operation".to_string(),
                 variants: operation_variants,
                 path_ref: None,
+                alias: None,
             },
         )]);
 
@@ -486,13 +487,29 @@ impl<'input> SchemaParser<'input> {
                     .map(RawNamespaceItem::Variant)
                     .collect(),
                 path_ref: None,
+                alias: None,
+            });
+        }
+
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::Ident(_))
+        ) {
+            let alias = self.parse_type()?;
+            return Ok(RawNamespaceDefinition {
+                name,
+                items: Vec::new(),
+                path_ref: None,
+                alias: Some(alias),
             });
         }
 
         if !self.decoder.peek_is_record_start().map_err(to_syn_error)? {
             return Err(syn::Error::new(
                 Span::call_site(),
-                format!("schema namespace entry `{name}` must carry a declaration record or path"),
+                format!(
+                    "schema namespace entry `{name}` must carry an enum vector, struct record, path, or alias"
+                ),
             ));
         }
 
@@ -511,6 +528,7 @@ impl<'input> SchemaParser<'input> {
                 name,
                 items: Vec::new(),
                 path_ref: Some(path_ref),
+                alias: None,
             });
         }
         let first_type = self.parse_type()?;
@@ -542,6 +560,7 @@ impl<'input> SchemaParser<'input> {
             name,
             items,
             path_ref: None,
+            alias: None,
         })
     }
 
@@ -566,6 +585,7 @@ impl<'input> SchemaParser<'input> {
                 name,
                 variants: Vec::new(),
                 path_ref: Some(path_ref),
+                alias: None,
             });
         }
 
@@ -578,6 +598,7 @@ impl<'input> SchemaParser<'input> {
             name,
             variants,
             path_ref: None,
+            alias: None,
         })
     }
 
@@ -591,6 +612,7 @@ impl<'input> SchemaParser<'input> {
             name: "Reply".to_string(),
             variants,
             path_ref: None,
+            alias: None,
         })
     }
 
@@ -623,6 +645,7 @@ impl<'input> SchemaParser<'input> {
             name: "Event".to_string(),
             variants,
             path_ref: None,
+            alias: None,
         })
     }
 
@@ -890,6 +913,7 @@ impl ResolvedSchema {
                         name.clone(),
                         SchemaDefinition {
                             name: definition.name.clone(),
+                            alias: definition.alias.as_ref().map(SchemaType::from),
                             variants: definition
                                 .variants
                                 .iter()
@@ -1076,22 +1100,44 @@ struct ResolvedDefinition {
     name: String,
     variants: Vec<ResolvedVariant>,
     path_ref: Option<String>,
+    alias: Option<ResolvedType>,
 }
 
 struct RawNamespaceDefinition {
     name: String,
     items: Vec<RawNamespaceItem>,
     path_ref: Option<String>,
+    alias: Option<ResolvedType>,
 }
 
 impl RawNamespaceDefinition {
     fn into_resolved(self, known_names: &BTreeSet<String>) -> syn::Result<ResolvedDefinition> {
+        if let Some(alias) = self.alias {
+            if !schema_type_resolves(&alias, known_names) {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!(
+                        "schema alias `{}` points at unknown type `{}`",
+                        self.name,
+                        schema_type_name(&alias)
+                    ),
+                ));
+            }
+            return Ok(ResolvedDefinition {
+                name: self.name,
+                variants: Vec::new(),
+                path_ref: None,
+                alias: Some(alias),
+            });
+        }
+
         let Some(path_ref) = self.path_ref else {
             let variants = resolve_namespace_items(&self.name, self.items, known_names)?;
             return Ok(ResolvedDefinition {
                 name: self.name,
                 variants,
                 path_ref: None,
+                alias: None,
             });
         };
 
@@ -1099,6 +1145,7 @@ impl RawNamespaceDefinition {
             name: self.name,
             variants: Vec::new(),
             path_ref: Some(path_ref),
+            alias: None,
         })
     }
 }
@@ -1181,6 +1228,14 @@ fn schema_type_resolves(schema_type: &ResolvedType, known_names: &BTreeSet<Strin
         ResolvedType::Vec(inner) | ResolvedType::Option(inner) => {
             schema_type_resolves(inner, known_names)
         }
+    }
+}
+
+fn schema_type_name(schema_type: &ResolvedType) -> String {
+    match schema_type {
+        ResolvedType::Named(name) => name.clone(),
+        ResolvedType::Vec(inner) => format!("Vec<{}>", schema_type_name(inner)),
+        ResolvedType::Option(inner) => format!("Option<{}>", schema_type_name(inner)),
     }
 }
 
@@ -1364,6 +1419,7 @@ mod tests {
               Kind [Decision Principle Correction Clarification Constraint]
               Entry (Topic Kind Magnitude)
               Topic (String)
+              WorkspaceTopic Topic
               Observation [State (Records RecordQuery) Topics]
               RecordQuery ([Option Topic] [Option Kind])
               State (String)
@@ -1406,6 +1462,10 @@ mod tests {
             [ResolvedVariant::Data { name, fields, .. }]
                 if name == "Entry" && fields.len() == 3
         ));
+        assert!(matches!(
+            &schema.definitions["WorkspaceTopic"].alias,
+            Some(ResolvedType::Named(name)) if name == "Topic"
+        ));
 
         let channel = schema.into_channel_spec().expect("channel spec");
         assert_eq!(channel.request.variants[0].variant_name, "Record");
@@ -1438,6 +1498,31 @@ mod tests {
             error
                 .to_string()
                 .contains("schema namespace entry `Entry` must not restate its key")
+        );
+    }
+
+    #[test]
+    fn namespace_map_rejects_alias_to_unknown_type() {
+        let text = r#"
+            []
+            []
+            []
+            {}
+            {
+              Entry MissingType
+            }
+            []
+        "#;
+
+        let mut parser = SchemaParser::new(text);
+        let error = match parser.parse() {
+            Ok(_) => panic!("unknown alias accepted"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("schema alias `Entry` points at unknown type `MissingType`")
         );
     }
 
