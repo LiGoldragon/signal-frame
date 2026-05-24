@@ -1,0 +1,28 @@
+{}
+
+[]
+
+[]
+
+[]
+
+{
+  Frame (ShortHeader Payload)
+  ShortHeader (u64)
+  Payload (Bytes)
+  Request (Frame)
+  Reply (Frame)
+  OperationDispatch (ShortHeader)
+  SignalChannelMacro (Text)
+  Bytes (String)
+  Text (String)
+  Identifier (u64)
+  Name (String)
+  Path (String)
+  Status [Concept Active Retired]
+}
+
+[
+  (Version 0 1)
+  (Status Concept)
+]
