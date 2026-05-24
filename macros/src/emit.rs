@@ -4,6 +4,8 @@
 //! `observable` block, also injects observer-subscription operations,
 //! an `ObserverStream`, and the runtime publish surface.
 
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse_quote;
@@ -41,6 +43,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
     let frame_aliases = emit_frame_aliases(&augmented);
     let frame_builders = emit_frame_builders(&augmented);
     let nota_codecs = emit_nota_codecs(&augmented);
+    let boxed_nota_codecs = emit_boxed_nota_codecs(&augmented);
 
     quote! {
         #request_enum
@@ -56,6 +59,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
         #frame_aliases
         #frame_builders
         #nota_codecs
+        #boxed_nota_codecs
         #observable_runtime
     }
 }
@@ -630,8 +634,10 @@ fn single_variant_fields(definition: &SchemaDefinition) -> Option<&[SchemaType]>
 }
 
 fn field_name_for_type(parent: &str, schema_type: &SchemaType) -> Option<String> {
-    let SchemaType::Named(name) = schema_type else {
-        return None;
+    let name = match schema_type {
+        SchemaType::Named(name) => name,
+        SchemaType::Option(inner) => return field_name_for_type(parent, inner),
+        SchemaType::Vec(_) => return None,
     };
     // DESIGN-DECISION-REVIEW (designer/322 §3.4): type-only
     // positional with field-name = type-name-lowercased default.
@@ -640,6 +646,33 @@ fn field_name_for_type(parent: &str, schema_type: &SchemaType) -> Option<String>
     // primitive type and the default naming becomes ambiguous.
     if parent == "Entry" && name == "Magnitude" {
         return Some("certainty".to_string());
+    }
+    if parent == "RecordSummary" && name == "RecordIdentifier" {
+        return Some("identifier".to_string());
+    }
+    if parent == "RecordSummary" && name == "Magnitude" {
+        return Some("certainty".to_string());
+    }
+    if parent == "QuestionSummary" && name == "QuestionIdentifier" {
+        return Some("identifier".to_string());
+    }
+    if parent == "QuestionSummary" && name == "QuestionText" {
+        return Some("question".to_string());
+    }
+    if parent == "State" && name == "FocusArea" {
+        return Some("focus".to_string());
+    }
+    if parent == "OperationReceived" && name == "OperationKind" {
+        return Some("operation".to_string());
+    }
+    if parent == "EffectEmitted" && name == "SemaObservation" {
+        return Some("observation".to_string());
+    }
+    if parent == "RecordObservation" && name == "RecordQuery" {
+        return Some("query".to_string());
+    }
+    if parent == "RecordCaptured" && name == "RecordSummary" {
+        return Some("record".to_string());
     }
     if (parent == "RecordQuery" || parent == "RecordSubscription") && name == "ObservationMode" {
         return Some("mode".to_string());
@@ -959,6 +992,273 @@ fn emit_nota_codecs(spec: &ChannelSpec) -> TokenStream {
         #request_codec
         #reply_codec
         #event_codec
+    }
+}
+
+fn emit_boxed_nota_codecs(spec: &ChannelSpec) -> TokenStream {
+    let Some(schema) = &spec.schema else {
+        return TokenStream::new();
+    };
+
+    schema
+        .definitions
+        .values()
+        .filter_map(|definition| emit_boxed_nota_codec(schema, definition))
+        .collect()
+}
+
+struct BoxedFieldPlan<'schema> {
+    index: usize,
+    field_ident: syn::Ident,
+    field_type: &'schema SchemaType,
+    boxed: bool,
+}
+
+fn emit_boxed_nota_codec(
+    schema: &SchemaSpec,
+    definition: &SchemaDefinition,
+) -> Option<TokenStream> {
+    if should_skip_boxed_codec(definition) {
+        return None;
+    }
+    let fields = single_variant_fields(definition)?;
+    let plan = boxed_field_plan(schema, definition, fields)?;
+    if !plan.iter().any(|field| field.boxed) {
+        return None;
+    }
+
+    let type_name = format_ident!("{}", definition.name);
+    let type_name_text = definition.name.clone();
+    let box_count = plan.iter().filter(|field| field.boxed).count();
+    let root_fields = plan.iter().filter(|field| !field.boxed);
+    let box_fields = plan.iter().filter(|field| field.boxed);
+    let decode_root_fields = plan.iter().filter(|field| !field.boxed);
+    let decode_box_fields = plan.iter().filter(|field| field.boxed);
+    let construct_fields = plan
+        .iter()
+        .map(|field| field.field_ident.clone())
+        .collect::<Vec<_>>();
+
+    let encode_root_fields = root_fields.map(|field| {
+        let field_ident = &field.field_ident;
+        quote! {
+            self.#field_ident.encode(encoder)?;
+        }
+    });
+    let encode_box_arms = box_fields.map(|field| {
+        let field_ident = &field.field_ident;
+        let box_index = syn::Index::from(field.index);
+        quote! {
+            #box_index => self.#field_ident.encode(encoder),
+        }
+    });
+    let decode_root_statements = decode_root_fields.map(|field| {
+        let field_ident = &field.field_ident;
+        let field_type = schema_type_tokens(field.field_type)?;
+        Some(quote! {
+            let #field_ident = <#field_type as ::nota_codec::NotaDecode>::decode(&mut root_decoder)?;
+        })
+    }).collect::<Option<Vec<_>>>()?;
+    let decode_binary_box_statements = decode_box_fields
+        .map(|field| {
+            let field_ident = &field.field_ident;
+            let field_type = schema_type_tokens(field.field_type)?;
+            let box_index = syn::Index::from(field.index);
+            Some(quote! {
+                let #field_ident = ::nota_box::decode_binary_box::<#field_type>(
+                    decoder.read_box(#box_index)?
+                )?;
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let decode_text_box_statements = plan
+        .iter()
+        .filter(|field| field.boxed)
+        .map(|field| {
+            let field_ident = &field.field_ident;
+            let field_type = schema_type_tokens(field.field_type)?;
+            let box_index = syn::Index::from(field.index);
+            Some(quote! {
+                let #field_ident = ::nota_box::decode_text_box::<#field_type>(
+                    &boxes[#box_index]
+                )?;
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(quote! {
+        impl ::nota_box::BoxedNotaEncode for #type_name {
+            fn encode_root(
+                &self,
+                encoder: &mut ::nota_codec::Encoder,
+            ) -> Result<(), ::nota_codec::Error> {
+                // DESIGN-DECISION-REVIEW (designer/323 §3.3):
+                // length-prefixed boxes are emitted in declaration
+                // order while fixed fields stay in the root.
+                encoder.start_record(#type_name_text)?;
+                #( #encode_root_fields )*
+                encoder.end_record()
+            }
+
+            fn box_count(&self) -> usize {
+                #box_count
+            }
+
+            fn encode_box(
+                &self,
+                index: usize,
+                encoder: &mut ::nota_codec::Encoder,
+            ) -> Result<(), ::nota_codec::Error> {
+                match index {
+                    #( #encode_box_arms )*
+                    _ => Err(::nota_codec::Error::UnexpectedEnd {
+                        while_parsing: "boxed NOTA field",
+                    }),
+                }
+            }
+        }
+
+        impl ::nota_box::BoxedNotaDecode for #type_name {
+            fn decode_full_binary(bytes: &[u8]) -> Result<Self, ::nota_box::Error> {
+                let root_length = ::nota_box::root_text_length(bytes)?;
+                let decoder = ::nota_box::BoxedNotaDecoder::new(bytes, root_length)?;
+                let root = std::str::from_utf8(decoder.root())?;
+                let mut root_decoder = ::nota_codec::Decoder::new(root);
+                root_decoder.expect_record_head(#type_name_text)?;
+                #( #decode_root_statements )*
+                root_decoder.expect_record_end()?;
+                #( #decode_binary_box_statements )*
+                Ok(Self {
+                    #( #construct_fields, )*
+                })
+            }
+
+            fn decode_full_text(text: &str) -> Result<Self, ::nota_box::Error> {
+                let root_end = ::nota_box::root_text_end(text)?;
+                let (root, boxes) = ::nota_box::split_text_boxes(text, root_end, #box_count)?;
+                let mut root_decoder = ::nota_codec::Decoder::new(root);
+                root_decoder.expect_record_head(#type_name_text)?;
+                #( #decode_root_statements )*
+                root_decoder.expect_record_end()?;
+                #( #decode_text_box_statements )*
+                Ok(Self {
+                    #( #construct_fields, )*
+                })
+            }
+        }
+    })
+}
+
+fn should_skip_boxed_codec(definition: &SchemaDefinition) -> bool {
+    matches!(
+        definition.name.as_str(),
+        "Operation"
+            | "Reply"
+            | "Event"
+            | "OperationKind"
+            | "ReplyKind"
+            | "EventKind"
+            | "StreamKind"
+            | "ObserverFilter"
+            | "ObserverSubscriptionToken"
+            | "ObserverSubscriptionOpened"
+    ) || definition.alias.is_some()
+        || is_leaf_enum(definition)
+}
+
+fn boxed_field_plan<'schema>(
+    schema: &SchemaSpec,
+    definition: &SchemaDefinition,
+    fields: &'schema [SchemaType],
+) -> Option<Vec<BoxedFieldPlan<'schema>>> {
+    let mut box_index = 0usize;
+    let mut plan = Vec::with_capacity(fields.len());
+    for schema_type in fields {
+        let field_name = field_name_for_type(&definition.name, schema_type)?;
+        if field_name == "u8"
+            || field_name == "u16"
+            || field_name == "u32"
+            || field_name == "u64"
+            || field_name == "bool"
+            || field_name == "string"
+            || field_name == "bytes"
+        {
+            return None;
+        }
+        let boxed = !is_fixed_schema_type(schema, schema_type, &mut BTreeSet::new());
+        let index = if boxed {
+            let current = box_index;
+            box_index += 1;
+            current
+        } else {
+            0
+        };
+        plan.push(BoxedFieldPlan {
+            index,
+            field_ident: format_ident!("{}", field_name),
+            field_type: schema_type,
+            boxed,
+        });
+    }
+    Some(plan)
+}
+
+fn is_fixed_schema_type(
+    schema: &SchemaSpec,
+    schema_type: &SchemaType,
+    visiting: &mut BTreeSet<String>,
+) -> bool {
+    match schema_type {
+        SchemaType::Named(name) => is_fixed_named_type(schema, name, visiting),
+        SchemaType::Vec(_) | SchemaType::Option(_) => false,
+    }
+}
+
+fn is_fixed_named_type(schema: &SchemaSpec, name: &str, visiting: &mut BTreeSet<String>) -> bool {
+    match name {
+        "u8" | "u16" | "u32" | "u64" | "bool" | "Date" | "Time" => return true,
+        "String" | "Bytes" => return false,
+        _ => {}
+    }
+    if !visiting.insert(name.to_string()) {
+        return false;
+    }
+    let fixed = schema
+        .definitions
+        .get(name)
+        .map(|definition| {
+            if let Some(alias) = &definition.alias {
+                return is_fixed_schema_type(schema, alias, visiting);
+            }
+            if is_leaf_enum(definition) {
+                return true;
+            }
+            definition.variants.iter().all(|variant| match variant {
+                SchemaVariant::Unit { .. } => true,
+                SchemaVariant::Data { fields, .. } => fields
+                    .iter()
+                    .all(|field| is_fixed_schema_type(schema, field, visiting)),
+            })
+        })
+        .unwrap_or(false);
+    visiting.remove(name);
+    fixed
+}
+
+fn schema_type_tokens(schema_type: &SchemaType) -> Option<TokenStream> {
+    match schema_type {
+        SchemaType::Named(name) => {
+            let ident = format_ident!("{}", name);
+            Some(quote!(#ident))
+        }
+        SchemaType::Vec(inner) => {
+            let inner = schema_type_tokens(inner)?;
+            Some(quote!(Vec<#inner>))
+        }
+        SchemaType::Option(inner) => {
+            let inner = schema_type_tokens(inner)?;
+            Some(quote!(Option<#inner>))
+        }
     }
 }
 
