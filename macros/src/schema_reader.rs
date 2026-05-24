@@ -750,6 +750,19 @@ impl<'input> SchemaParser<'input> {
     }
 
     fn parse_variant_after_name(&mut self, name: String) -> syn::Result<ResolvedVariant> {
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::LBracket)
+        ) {
+            let payload = self.parse_header_endpoint_vector(&name)?;
+            self.decoder.expect_record_end().map_err(to_syn_error)?;
+            return Ok(ResolvedVariant::Data {
+                name,
+                fields: vec![payload],
+                belongs: None,
+            });
+        }
+
         if self.decoder.peek_is_record_start().map_err(to_syn_error)? {
             self.decoder.expect_record_start().map_err(to_syn_error)?;
             let field_name = self
@@ -829,6 +842,35 @@ impl<'input> SchemaParser<'input> {
             fields,
             belongs: None,
         })
+    }
+
+    fn parse_header_endpoint_vector(
+        &mut self,
+        variant_name: &str,
+    ) -> syn::Result<ResolvedType> {
+        self.decoder.expect_seq_start().map_err(to_syn_error)?;
+        if self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                format!("schema header node `{variant_name}` must name one endpoint"),
+            ));
+        }
+
+        let endpoint = self
+            .decoder
+            .read_pascal_identifier()
+            .map_err(to_syn_error)?;
+        if !self.decoder.peek_is_seq_end().map_err(to_syn_error)? {
+            return Err(syn::Error::new(
+                Span::call_site(),
+                format!(
+                    "schema header node `{variant_name}` must name exactly one endpoint in the MVP"
+                ),
+            ));
+        }
+        self.decoder.expect_seq_end().map_err(to_syn_error)?;
+
+        Ok(ResolvedType::Named(endpoint))
     }
 
     fn parse_engine_annotation(&mut self) -> syn::Result<()> {
@@ -1402,9 +1444,9 @@ mod tests {
     fn parses_schema_file_body_with_header_vectors_and_namespace_map() {
         let text = r#"
             [
-              (Record (Entry (engine assert)))
-              (Observe (Observation (engine match)))
-              (Unwatch (SubscriptionToken (engine retract)))
+              (Record [Entry])
+              (Observe [Observation])
+              (Unwatch [SubscriptionToken])
             ]
 
             []
@@ -1473,6 +1515,34 @@ mod tests {
         assert_eq!(
             channel.streams[0].events,
             vec![Ident::new("RecordCaptured", Span::call_site())]
+        );
+    }
+
+    #[test]
+    fn schema_file_body_rejects_multi_endpoint_header_node_for_now() {
+        let text = r#"
+            [
+              (Record [Entry ExtraEndpoint])
+            ]
+            []
+            []
+            {}
+            {
+              Entry (String)
+              ExtraEndpoint (String)
+            }
+            []
+        "#;
+
+        let mut parser = SchemaParser::new(text);
+        let error = match parser.parse() {
+            Ok(_) => panic!("multi-endpoint header node accepted"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("schema header node `Record` must name exactly one endpoint")
         );
     }
 
