@@ -164,18 +164,30 @@ impl<'input> SchemaParser<'input> {
 
     fn parse_struct_schema(&mut self) -> syn::Result<ResolvedSchema> {
         self.decoder.expect_record_start().map_err(to_syn_error)?;
-        let head = self
-            .decoder
-            .read_pascal_identifier()
-            .map_err(to_syn_error)?;
-        if head != "Schema" {
-            return Err(syn::Error::new(
-                Span::call_site(),
-                format!("expected schema root `Schema`, got `{head}`"),
-            ));
-        }
-
-        let mut definitions = self.parse_channel_section()?;
+        let mut definitions = match self.decoder.peek_token().map_err(to_syn_error)? {
+            Some(Token::Ident(ref head)) if head == "Schema" => {
+                let _ = self
+                    .decoder
+                    .read_pascal_identifier()
+                    .map_err(to_syn_error)?;
+                self.parse_channel_section()?
+            }
+            Some(Token::LParen) => self.parse_channel_section()?,
+            Some(token) => {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    format!(
+                        "expected positional schema channel block or legacy `Schema` tag, got `{token:?}`"
+                    ),
+                ));
+            }
+            None => {
+                return Err(syn::Error::new(
+                    Span::call_site(),
+                    "unexpected end of schema root",
+                ));
+            }
+        };
         for (name, definition) in self.parse_namespace_section()? {
             definitions.insert(name, definition);
         }
@@ -185,15 +197,14 @@ impl<'input> SchemaParser<'input> {
 
     fn parse_channel_section(&mut self) -> syn::Result<BTreeMap<String, ResolvedDefinition>> {
         self.decoder.expect_record_start().map_err(to_syn_error)?;
-        let head = self
-            .decoder
-            .read_pascal_identifier()
-            .map_err(to_syn_error)?;
-        if head != "Channel" {
-            return Err(syn::Error::new(
-                Span::call_site(),
-                format!("expected first schema section `Channel`, got `{head}`"),
-            ));
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::Ident(ref head)) if head == "Channel"
+        ) {
+            let _ = self
+                .decoder
+                .read_pascal_identifier()
+                .map_err(to_syn_error)?;
         }
 
         let mut definitions = BTreeMap::new();
@@ -222,6 +233,13 @@ impl<'input> SchemaParser<'input> {
     }
 
     fn parse_namespace_section(&mut self) -> syn::Result<BTreeMap<String, ResolvedDefinition>> {
+        if matches!(
+            self.decoder.peek_token().map_err(to_syn_error)?,
+            Some(Token::LBrace)
+        ) {
+            return self.parse_namespace_map();
+        }
+
         self.decoder.expect_record_start().map_err(to_syn_error)?;
         let head = self
             .decoder
@@ -233,7 +251,12 @@ impl<'input> SchemaParser<'input> {
                 format!("expected second schema section `Namespace`, got `{head}`"),
             ));
         }
+        let definitions = self.parse_namespace_map()?;
+        self.decoder.expect_record_end().map_err(to_syn_error)?;
+        Ok(definitions)
+    }
 
+    fn parse_namespace_map(&mut self) -> syn::Result<BTreeMap<String, ResolvedDefinition>> {
         self.decoder.expect_map_start().map_err(to_syn_error)?;
         let mut raw_definitions = BTreeMap::new();
         while !self.decoder.peek_is_map_end().map_err(to_syn_error)? {
@@ -243,7 +266,6 @@ impl<'input> SchemaParser<'input> {
             raw_definitions.insert(name, definition);
         }
         self.decoder.expect_map_end().map_err(to_syn_error)?;
-        self.decoder.expect_record_end().map_err(to_syn_error)?;
 
         let known_names = raw_definitions.keys().cloned().collect::<BTreeSet<_>>();
         raw_definitions
@@ -281,6 +303,15 @@ impl<'input> SchemaParser<'input> {
             .decoder
             .read_pascal_identifier()
             .map_err(to_syn_error)?;
+        if declaration_name == "Path" {
+            let path_ref = self.decoder.read_path().map_err(to_syn_error)?;
+            self.decoder.expect_record_end().map_err(to_syn_error)?;
+            return Ok(RawNamespaceDefinition {
+                name,
+                items: Vec::new(),
+                path_ref: Some(path_ref),
+            });
+        }
         if declaration_name != name {
             return Err(syn::Error::new(
                 Span::call_site(),
@@ -984,7 +1015,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_corrected_schema_record_with_namespace_map() {
+    fn parses_legacy_tagged_schema_record_with_namespace_map() {
         let text = r#"
             (Schema
               (Channel
@@ -1026,6 +1057,52 @@ mod tests {
             channel.streams[0].events,
             vec![Ident::new("RecordCaptured", Span::call_site())]
         );
+    }
+
+    #[test]
+    fn parses_positional_schema_record_with_namespace_map() {
+        let text = r#"
+            (
+              (
+                (Operation
+                  (Record (Entry (engine assert)))
+                  (Observe Observation)
+                  (Unwatch SubscriptionToken))
+                (Reply
+                  (RecordAccepted RecordAccepted))
+                (Event
+                  (RecordCaptured (RecordCaptured belongs DomainStream)))
+                (Observable
+                  (filter default)
+                  (operation_event OperationReceived)
+                  (effect_event EffectEmitted)))
+              {
+                Magnitude (Path schemas/signal-sema/magnitude.schema.nota)
+                Entry (Entry Topic Magnitude)
+                Topic (Topic String)
+                Observation (Observation State)
+                State (State String)
+                RecordAccepted (RecordAccepted RecordIdentifier)
+                RecordIdentifier (RecordIdentifier u64)
+                RecordCaptured (RecordCaptured RecordAccepted)
+                SubscriptionToken (SubscriptionToken u64)
+              })
+        "#;
+
+        let mut parser = SchemaParser::new(text);
+        let schema = parser.parse().expect("schema parses");
+        assert!(schema.definitions.contains_key("Operation"));
+        assert_eq!(
+            schema
+                .definitions
+                .get("Magnitude")
+                .and_then(|definition| definition.path_ref.as_deref()),
+            Some("schemas/signal-sema/magnitude.schema.nota")
+        );
+
+        let channel = schema.into_channel_spec().expect("channel spec");
+        assert_eq!(channel.request.variants[0].variant_name, "Record");
+        assert_eq!(channel.reply.variants[0].variant_name, "RecordAccepted");
     }
 
     #[test]
