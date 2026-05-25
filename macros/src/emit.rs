@@ -12,8 +12,8 @@ use syn::parse_quote;
 
 use crate::model::{
     ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec, ReplyBlockSpec,
-    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, SchemaDefinition, SchemaSpec,
-    SchemaType, SchemaVariant, StreamBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, SchemaDefinition, SchemaField,
+    SchemaSpec, SchemaType, SchemaVariant, StreamBlockSpec,
 };
 
 pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
@@ -507,7 +507,7 @@ fn emit_slots_for_named_type(
         };
     }
     if let Some(fields) = single_variant_fields(definition) {
-        return emit_struct_field_slots(schema, definition, fields, expression, next_slot);
+        return emit_struct_field_slots(schema, fields, expression, next_slot);
     }
     emit_mixed_enum_slots(schema, definition, expression, next_slot)
 }
@@ -529,20 +529,19 @@ fn emit_slots_for_schema_type(
 
 fn emit_struct_field_slots(
     schema: &SchemaSpec,
-    definition: &SchemaDefinition,
-    fields: &[SchemaType],
+    fields: &[SchemaField],
     expression: TokenStream,
     mut next_slot: usize,
 ) -> SlotEmission {
     let mut tokens = TokenStream::new();
-    for schema_type in fields {
-        let Some(field_name) = field_name_for_type(&definition.name, schema_type) else {
+    for field in fields {
+        let Some(field_name) = field_name_for_field(field) else {
             continue;
         };
         let field_ident = format_ident!("{}", field_name);
         let emission = emit_slots_for_schema_type(
             schema,
-            schema_type,
+            &field.schema_type,
             quote!(#expression.#field_ident),
             next_slot,
         );
@@ -591,7 +590,7 @@ fn emit_mixed_enum_slots(
                 let nested = if fields.len() == 1 {
                     let emission = emit_slots_for_schema_type(
                         schema,
-                        &fields[0],
+                        &fields[0].schema_type,
                         quote!(#payload),
                         next_slot + 1,
                     );
@@ -626,72 +625,26 @@ fn is_leaf_enum(definition: &SchemaDefinition) -> bool {
         .all(|variant| matches!(variant, SchemaVariant::Unit { .. }))
 }
 
-fn single_variant_fields(definition: &SchemaDefinition) -> Option<&[SchemaType]> {
+fn single_variant_fields(definition: &SchemaDefinition) -> Option<&[SchemaField]> {
     match definition.variants.as_slice() {
         [SchemaVariant::Data { name, fields, .. }] if name == &definition.name => Some(fields),
         _ => None,
     }
 }
 
-fn field_name_for_type(parent: &str, schema_type: &SchemaType) -> Option<String> {
+fn field_name_for_field(field: &SchemaField) -> Option<String> {
+    if let Some(name) = &field.name {
+        return Some(name.clone());
+    }
+    field_name_for_type(&field.schema_type)
+}
+
+fn field_name_for_type(schema_type: &SchemaType) -> Option<String> {
     let name = match schema_type {
         SchemaType::Named(name) => name,
-        SchemaType::Option(inner) => return field_name_for_type(parent, inner),
+        SchemaType::Option(inner) => return field_name_for_type(inner),
         SchemaType::Vec(_) => return None,
     };
-    // DESIGN-DECISION-REVIEW (designer/322 §3.4): type-only
-    // positional with field-name = type-name-lowercased default.
-    // Alternative: explicit (field-name type) override syntax.
-    // Revisit when a contract has multiple fields of the same
-    // primitive type and the default naming becomes ambiguous.
-    if parent == "Entry" && name == "Magnitude" {
-        return Some("certainty".to_string());
-    }
-    if parent == "RecordSummary" && name == "RecordIdentifier" {
-        return Some("identifier".to_string());
-    }
-    if parent == "RecordSummary" && name == "Magnitude" {
-        return Some("certainty".to_string());
-    }
-    if parent == "QuestionSummary" && name == "QuestionIdentifier" {
-        return Some("identifier".to_string());
-    }
-    if parent == "QuestionSummary" && name == "QuestionText" {
-        return Some("question".to_string());
-    }
-    if parent == "State" && name == "FocusArea" {
-        return Some("focus".to_string());
-    }
-    if parent == "OperationReceived" && name == "OperationKind" {
-        return Some("operation".to_string());
-    }
-    if parent == "EffectEmitted" && name == "SemaObservation" {
-        return Some("observation".to_string());
-    }
-    if parent == "RecordObservation" && name == "RecordQuery" {
-        return Some("query".to_string());
-    }
-    if parent == "RecordCaptured" && name == "RecordSummary" {
-        return Some("record".to_string());
-    }
-    if parent == "RecordProvenance" && name == "RecordSummary" {
-        return Some("summary".to_string());
-    }
-    if parent == "SubscriptionOpened" && name == "SubscriptionToken" {
-        return Some("token".to_string());
-    }
-    if parent == "SubscriptionOpened" && name == "SubscriptionSnapshot" {
-        return Some("snapshot".to_string());
-    }
-    if parent == "SubscriptionRetracted" && name == "SubscriptionToken" {
-        return Some("token".to_string());
-    }
-    if (parent == "RecordQuery" || parent == "RecordSubscription") && name == "ObservationMode" {
-        return Some("mode".to_string());
-    }
-    if parent == "Statement" && name == "StatementText" {
-        return Some("text".to_string());
-    }
     Some(to_snake_case(name))
 }
 
@@ -1034,7 +987,7 @@ fn emit_boxed_nota_codec(
         return None;
     }
     let fields = single_variant_fields(definition)?;
-    let plan = boxed_field_plan(schema, definition, fields)?;
+    let plan = boxed_field_plan(schema, fields)?;
     if !plan.iter().any(|field| field.boxed) {
         return None;
     }
@@ -1180,13 +1133,12 @@ fn should_skip_boxed_codec(definition: &SchemaDefinition) -> bool {
 
 fn boxed_field_plan<'schema>(
     schema: &SchemaSpec,
-    definition: &SchemaDefinition,
-    fields: &'schema [SchemaType],
+    fields: &'schema [SchemaField],
 ) -> Option<Vec<BoxedFieldPlan<'schema>>> {
     let mut box_index = 0usize;
     let mut plan = Vec::with_capacity(fields.len());
-    for schema_type in fields {
-        let field_name = field_name_for_type(&definition.name, schema_type)?;
+    for field in fields {
+        let field_name = field_name_for_field(field)?;
         if field_name == "u8"
             || field_name == "u16"
             || field_name == "u32"
@@ -1197,7 +1149,7 @@ fn boxed_field_plan<'schema>(
         {
             return None;
         }
-        let boxed = !is_fixed_schema_type(schema, schema_type, &mut BTreeSet::new());
+        let boxed = !is_fixed_schema_type(schema, &field.schema_type, &mut BTreeSet::new());
         let index = if boxed {
             let current = box_index;
             box_index += 1;
@@ -1208,7 +1160,7 @@ fn boxed_field_plan<'schema>(
         plan.push(BoxedFieldPlan {
             index,
             field_ident: format_ident!("{}", field_name),
-            field_type: schema_type,
+            field_type: &field.schema_type,
             boxed,
         });
     }
@@ -1249,7 +1201,7 @@ fn is_fixed_named_type(schema: &SchemaSpec, name: &str, visiting: &mut BTreeSet<
                 SchemaVariant::Unit { .. } => true,
                 SchemaVariant::Data { fields, .. } => fields
                     .iter()
-                    .all(|field| is_fixed_schema_type(schema, field, visiting)),
+                    .all(|field| is_fixed_schema_type(schema, &field.schema_type, visiting)),
             })
         })
         .unwrap_or(false);

@@ -47,7 +47,7 @@ fn validate_schema_roots(spec: &ChannelSpec) -> syn::Result<()> {
         for variant in &definition.variants {
             if let SchemaVariant::Data { fields, .. } = variant {
                 for field in fields {
-                    validate_schema_type(schema, field, &spec.name)?;
+                    validate_schema_type(schema, &field.schema_type, &spec.name)?;
                 }
             }
         }

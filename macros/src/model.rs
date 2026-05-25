@@ -131,8 +131,14 @@ pub(crate) enum SchemaVariant {
     },
     Data {
         name: String,
-        fields: Vec<SchemaType>,
+        fields: Vec<SchemaField>,
     },
+}
+
+#[derive(Clone)]
+pub(crate) struct SchemaField {
+    pub(crate) name: Option<String>,
+    pub(crate) schema_type: SchemaType,
 }
 
 #[derive(Clone)]
@@ -140,6 +146,22 @@ pub(crate) enum SchemaType {
     Named(String),
     Vec(Box<SchemaType>),
     Option(Box<SchemaType>),
+}
+
+impl SchemaField {
+    pub(crate) fn inferred(schema_type: SchemaType) -> Self {
+        Self {
+            name: None,
+            schema_type,
+        }
+    }
+
+    pub(crate) fn named(name: impl Into<String>, schema_type: SchemaType) -> Self {
+        Self {
+            name: Some(name.into()),
+            schema_type,
+        }
+    }
 }
 
 impl ObservableBlockSpec {

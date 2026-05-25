@@ -16,8 +16,8 @@ use syn::{Ident, Type, parse_quote};
 
 use crate::model::{
     ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec, ReplyBlockSpec,
-    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, SchemaDefinition, SchemaSpec,
-    SchemaType, SchemaVariant, StreamBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, SchemaDefinition, SchemaField,
+    SchemaSpec, SchemaType, SchemaVariant, StreamBlockSpec,
 };
 
 pub(crate) fn read_default_schema() -> syn::Result<ChannelSpec> {
@@ -302,7 +302,9 @@ impl<'schema> SchemaConverter<'schema> {
             }
             variants.push(SchemaVariant::Data {
                 name: root,
-                fields: vec![schema_type_from_route_body(route.body())?],
+                fields: vec![SchemaField::inferred(schema_type_from_route_body(
+                    route.body(),
+                )?)],
             });
         }
         Ok(SchemaDefinition {
@@ -320,7 +322,9 @@ impl<'schema> SchemaConverter<'schema> {
                 .iter()
                 .map(|name| SchemaVariant::Data {
                     name: name.as_str().to_string(),
-                    fields: vec![SchemaType::Named(name.as_str().to_string())],
+                    fields: vec![SchemaField::inferred(SchemaType::Named(
+                        name.as_str().to_string(),
+                    ))],
                 })
                 .collect(),
             alias: None,
@@ -347,7 +351,9 @@ impl<'schema> SchemaConverter<'schema> {
                 .iter()
                 .map(|name| SchemaVariant::Data {
                     name: name.as_str().to_string(),
-                    fields: vec![SchemaType::Named(name.as_str().to_string())],
+                    fields: vec![SchemaField::inferred(SchemaType::Named(
+                        name.as_str().to_string(),
+                    ))],
                 })
                 .collect(),
             alias: None,
@@ -429,13 +435,15 @@ fn definition_from_body(name: &Name, body: &DeclarationBody) -> syn::Result<Sche
                     }),
                     Payload::Type(expression) => Ok(SchemaVariant::Data {
                         name: variant.name().as_str().to_string(),
-                        fields: vec![schema_type_from_expression(expression)?],
+                        fields: vec![SchemaField::inferred(schema_type_from_expression(
+                            expression,
+                        )?)],
                     }),
                     Payload::Fields(fields) => Ok(SchemaVariant::Data {
                         name: variant.name().as_str().to_string(),
                         fields: fields
                             .iter()
-                            .map(schema_type_from_expression)
+                            .map(schema_field_from_schema_field)
                             .collect::<syn::Result<Vec<_>>>()?,
                     }),
                 })
@@ -455,7 +463,7 @@ fn definition_from_body(name: &Name, body: &DeclarationBody) -> syn::Result<Sche
                 name: name_text,
                 fields: fields
                     .iter()
-                    .map(schema_type_from_expression)
+                    .map(schema_field_from_schema_field)
                     .collect::<syn::Result<Vec<_>>>()?,
             }],
             alias: None,
@@ -498,6 +506,14 @@ fn schema_type_from_expression(expression: &TypeExpression) -> syn::Result<Schem
             "schema macro MVP does not lower Map container expressions",
         )),
     }
+}
+
+fn schema_field_from_schema_field(field: &schema::Field) -> syn::Result<SchemaField> {
+    let schema_type = schema_type_from_expression(field.expression())?;
+    Ok(match field.name() {
+        Some(name) => SchemaField::named(name.as_str(), schema_type),
+        None => SchemaField::inferred(schema_type),
+    })
 }
 
 fn primitive_name(primitive: Primitive) -> String {
