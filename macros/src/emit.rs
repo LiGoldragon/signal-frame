@@ -432,7 +432,7 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
             async fn dispatch_operation(
                 &mut self,
                 operation: #request_name,
-            ) -> Result<#reply_name, Self::Error> {
+            ) -> ::std::result::Result<#reply_name, Self::Error> {
                 match operation {
                     #( #dispatch_arms, )*
                 }
@@ -442,7 +442,7 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
                 &mut self,
                 short_header: ::signal_frame::ShortHeader,
                 operation: #request_name,
-            ) -> Result<#reply_name, Self::Error> {
+            ) -> ::std::result::Result<#reply_name, Self::Error> {
                 let expected = short_header.to_le_bytes()[0];
                 let Some(expected_kind) = #request_name::kind_from_short_header(short_header) else {
                     return Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
