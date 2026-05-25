@@ -965,11 +965,51 @@ fn emit_boxed_nota_codecs(spec: &ChannelSpec) -> TokenStream {
         return TokenStream::new();
     };
 
+    let emitted_names = request_payload_schema_names(spec, schema);
     schema
         .definitions
         .values()
+        .filter(|definition| emitted_names.contains(&definition.name))
         .filter_map(|definition| emit_boxed_nota_codec(schema, definition))
         .collect()
+}
+
+fn request_payload_schema_names(spec: &ChannelSpec, schema: &SchemaSpec) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for variant in &spec.request.variants {
+        if let Some(name) = type_name_from_syn(&variant.payload_type) {
+            collect_schema_name(schema, &name, &mut names);
+        }
+    }
+    names
+}
+
+fn collect_schema_name(schema: &SchemaSpec, name: &str, names: &mut BTreeSet<String>) {
+    if is_primitive(name) || !names.insert(name.to_string()) {
+        return;
+    }
+    let Some(definition) = schema.definitions.get(name) else {
+        return;
+    };
+    if let Some(alias) = &definition.alias {
+        collect_schema_type(schema, alias, names);
+    }
+    for variant in &definition.variants {
+        if let SchemaVariant::Data { fields, .. } = variant {
+            for field in fields {
+                collect_schema_type(schema, &field.schema_type, names);
+            }
+        }
+    }
+}
+
+fn collect_schema_type(schema: &SchemaSpec, schema_type: &SchemaType, names: &mut BTreeSet<String>) {
+    match schema_type {
+        SchemaType::Named(name) => collect_schema_name(schema, name, names),
+        SchemaType::Vec(inner) | SchemaType::Option(inner) => {
+            collect_schema_type(schema, inner, names);
+        }
+    }
 }
 
 struct BoxedFieldPlan<'schema> {
