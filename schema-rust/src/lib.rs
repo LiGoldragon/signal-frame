@@ -213,10 +213,14 @@ impl<'schema> RustComposer<'schema> {
     }
 
     fn reply_items(&self, assembled: &AssembledSchema) -> Result<Vec<TokenStream>> {
-        let Some(replies) = assembled.features().iter().find_map(|feature| match feature {
-            Feature::Reply(replies) => Some(replies),
-            _ => None,
-        }) else {
+        let Some(replies) = assembled
+            .features()
+            .iter()
+            .find_map(|feature| match feature {
+                Feature::Reply(replies) => Some(replies),
+                _ => None,
+            })
+        else {
             return Ok(Vec::new());
         };
 
@@ -237,10 +241,14 @@ impl<'schema> RustComposer<'schema> {
     }
 
     fn event_items(&self, assembled: &AssembledSchema) -> Result<Vec<TokenStream>> {
-        let Some(event) = assembled.features().iter().find_map(|feature| match feature {
-            Feature::Event(event) => Some(event),
-            _ => None,
-        }) else {
+        let Some(event) = assembled
+            .features()
+            .iter()
+            .find_map(|feature| match feature {
+                Feature::Event(event) => Some(event),
+                _ => None,
+            })
+        else {
             return Ok(Vec::new());
         };
 
@@ -549,8 +557,8 @@ mod tests {
 
     #[test]
     fn composer_emits_module_from_assembled_schema_without_legacy_model() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/simple.schema");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple.schema");
         let loaded = LoadedSchema::read_path(path).expect("schema reads");
         let module = RustComposer::new(&loaded).compose().expect("composes");
         let text = module.into_tokens().to_string();
