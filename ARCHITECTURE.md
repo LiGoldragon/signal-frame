@@ -593,20 +593,20 @@ macros/               sibling proc-macro crate
 
 ## Macro-pattern integration
 
-**Status:** integrated into the brilliant macro library pattern per `reports/designer/326-v13-spirit-complete-schema-vision.md §3` (schemas as macro-pattern instance).
+**Status:** integrated into the `schema-rust` composer + `emit_schema!` proc-macro pattern per `reports/designer/340-schema-emission-no-legacy-signal-channel-2026-05-25.md` + `reports/operator/184-schema-macro-old-emitter-audit-2026-05-25.md` (schemas as `AssembledSchema` input to the `schema-rust` composer; emission top-down through `emit_schema!`). Supersedes `/326-v13`'s "brilliant macro library" framing which endorsed extending `signal-frame/macros/` — that direction is reversed per psyche record 639.
 
 **Role:** this crate is the wire kernel. It owns `Frame`, `ShortHeader`, `Caller`, the request/reply mechanics, and the streaming subscription envelope. Every component's wire surface is expressed in this kernel's types.
 
-**Integration target:** the wire kernel emitted Frame + ShortHeader + Caller; the macro emits `signal_channel!` invocations against this crate's types. Under the schema-engine upgrade, the `.schema` file replaces the hand-written `signal_channel!` body, but the emitted code still binds to `signal-frame`'s Frame / ShortHeader / dispatcher contracts — the kernel itself does not change shape; it is consumed by the schema-driven lowering rather than by hand-written macro calls.
+**Integration target:** the wire kernel provides Frame + ShortHeader + Caller. The `emit_schema!` proc-macro shells out to the `schema-rust` composer library: the composer reads a `<component>.schema` file's `AssembledSchema`, walks it top-down, and emits Rust that binds directly to `signal-frame`'s Frame / ShortHeader / dispatcher contracts. The `.schema` file does NOT lower through a generated `signal_channel!` invocation or through `ChannelSpec` — emission is fresh, not a wrapping. The kernel itself does not change shape; it is consumed by the schema-driven Rust composer rather than by hand-written macro calls.
 
 **References:**
 - `reports/designer/326-v13-spirit-complete-schema-vision.md` — schema language + macro pattern
 - `reports/designer/324-migration-mvp-spirit-handover-re-specification.md` — migration MVP
 - `reports/operator/174-schema-import-header-design-critique-2026-05-24.md` — lowering + AssembledSchema form
 
-### Sibling subcrate `signal-frame-macros`
+### Sibling subcrate `signal-frame/macros/` — LEGACY, DELETED
 
-The `macros/` proc-macro subcrate is the brilliant macro library itself. Under the schema-engine upgrade it gains the schema reader + AssembledSchema lowering per `/326-v13` + `primary-ezqx.1`: instead of parsing a `signal_channel! { … }` body, the macro reads a sibling `<component>/<component>.schema` file, resolves cross-schema imports, lowers to `AssembledSchema`, and emits the same Frame / ShortHeader / dispatcher / Command-Effect / VersionProjection / storage descriptor code it does today. The proc-macro entrypoint shifts from `#[proc_macro]` body parser to `#[proc_macro]` schema-file reader; emit-side stays bound to `signal-frame`'s kernel types. Sequencing: schema reader lands as `primary-ezqx.1` MVP against Spirit; `signal_channel!` body form remains supported during the migration window.
+The `macros/` proc-macro subcrate is the LEGACY `signal_channel!` emission infrastructure. Under the schema-engine upgrade per psyche record 639 it is DELETED — replaced by the standalone `schema-rust` composer library (consumed via the `emit_schema!` proc-macro). The `schema-rust` composer walks `AssembledSchema` top-down and emits Rust directly; no downconversion through `ChannelSpec`. See `reports/designer/340-schema-emission-no-legacy-signal-channel-2026-05-25.md` + `reports/operator/184-schema-macro-old-emitter-audit-2026-05-25.md` for the full re-architecture. Migration: each contract crate replaces its `signal_channel! { ... }` body with a `<crate>.schema` file + `emit_schema!()` call; the old text-body form may be fenced as `legacy_signal_channel!` during the transition window, then removed with the `macros/` subcrate. The `signal-frame` runtime side (`src/lib.rs`, `src/request.rs`, frame envelope, kernel types) STAYS — only `signal-frame/macros/` is deleted.
 
 ## See Also
 
