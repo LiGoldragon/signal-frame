@@ -24,6 +24,7 @@
           src = ./.;
           filter = path: type:
             (craneLib.filterCargoSources path type)
+            || (builtins.match ".*\\.schema$" path != null)
             || (builtins.match ".*\\.stderr$" path != null)
             || (builtins.match ".*/tests/golden/.*\\.bin$" path != null);
         };
@@ -38,9 +39,25 @@
           inherit cargoArtifacts;
         });
 
-        checks.default = craneLib.cargoTest (commonArgs // {
-          inherit cargoArtifacts;
-        });
+        checks = {
+          default = craneLib.cargoTest (commonArgs // {
+            inherit cargoArtifacts;
+          });
+
+          schema-macro-does-not-use-legacy-emitter = pkgs.runCommand
+            "schema-macro-does-not-use-legacy-emitter"
+            { }
+            ''
+              if ${pkgs.ripgrep}/bin/rg -n \
+                "ChannelSpec|schema_reader|emit::emit|crate::emit|crate::model" \
+                ${src}/schema-rust/src ${src}/macros/src/schema_entry.rs
+              then
+                echo "emit_schema/schema-rust path must not use the legacy ChannelSpec emitter" >&2
+                exit 1
+              fi
+              touch $out
+            '';
+        };
 
         devShells.default = pkgs.mkShell {
           name = "signal-frame";

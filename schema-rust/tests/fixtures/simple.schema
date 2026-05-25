@@ -1,0 +1,35 @@
+{}
+
+[
+  (State [Statement Declaration])
+  (Record [Entry])
+  (Observe [Records])
+]
+
+[]
+
+[]
+
+{
+  State (Idle Active)
+  Kind (Decision Principle Correction)
+
+  Topic [String]
+  Text [String]
+  Summary [String]
+  Context [String]
+  Quote [String]
+  RecordIdentifier [u64]
+
+  Statement [Topic Text]
+  Declaration [Topic Kind Text]
+  Entry [Topic Kind Summary Context Quote]
+  RecordQuery [Topic Kind]
+  Records [RecordQuery]
+  RecordAccepted [RecordIdentifier]
+  RecordsObserved [RecordIdentifier]
+}
+
+[
+  (Reply RecordAccepted RecordsObserved)
+]

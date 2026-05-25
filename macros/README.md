@@ -1,15 +1,25 @@
 # signal-frame-macros
 
-Proc-macro engine for `signal_channel!`.
+Proc-macro front door for `emit_schema!` and the migration-only
+`legacy_signal_channel!`.
 
-## Contract-local operation grammar
+`emit_schema!` is the schema-driven Rust composer entrypoint. It reads
+structured schema data, lowers through the `schema` crate, and delegates
+Rust emission to `schema-rust`. It must not route through the legacy
+`ChannelSpec` model.
+
+`legacy_signal_channel!` is the old handwritten channel declaration
+grammar. It remains only while existing contracts migrate to schema.
+`signal_channel!` is a compatibility alias for that old path.
+
+## Legacy Contract-Local Operation Grammar
 
 The macro's input grammar declares contract-local operation roots
 directly. The operation root is the caller's domain action; no
 universal Sema verb appears at this layer.
 
 ```rust
-signal_channel! {
+legacy_signal_channel! {
     channel Ledger {
         operation Receive(HookNotification),
         operation Push(Push),
@@ -47,7 +57,7 @@ module path as the namespace.
   NOTA record-head uniqueness, and stream-block cross-references
   carry over unchanged.
 
-## Optional `observable` block
+## Legacy Optional `observable` Block
 
 A channel can opt into an observer-subscription surface by declaring
 an `observable` block. When present the macro injects the
@@ -58,7 +68,7 @@ standardized `Tap(<Filter>) opens ObserverStream` /
 `publish_*` methods the daemon's executor calls.
 
 ```rust
-signal_channel! {
+legacy_signal_channel! {
     channel Spirit {
         operation State(Statement),
         operation Record(Entry),

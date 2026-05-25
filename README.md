@@ -6,8 +6,8 @@ communication in the primary workspace.
 `signal-frame` owns the universal request/reply spine, protocol
 version records, length-prefixed rkyv frame helpers, exchange
 identifiers, async correlation primitives, stream / subscription
-lifecycle, reply plumbing, and the `signal_channel!` declaration
-macro. It also owns the shared `signal_cli!` thin-client skeleton
+lifecycle, reply plumbing, and the `emit_schema!` schema composer
+entrypoint. It also owns the shared `signal_cli!` thin-client skeleton
 used by component CLIs: one NOTA argument in, one typed frame to the
 daemon, one NOTA reply out. Domain records and contract-local operation
 roots live in the per-component contract crates that depend on this
@@ -20,11 +20,17 @@ to the sibling crate `signal-sema`, where they describe the
 internal Sema-engine execution vocabulary rather than public
 wire-contract verbs.
 
-The `signal_channel!` macro declares contract-local operation roots
-directly:
+`emit_schema!` is the schema-driven Rust composer entrypoint:
 
 ```rust
-signal_channel! {
+signal_frame::emit_schema!("spirit.schema");
+```
+
+During migration, `legacy_signal_channel!` keeps the old handwritten
+macro body grammar alive for contracts that have not moved to schema:
+
+```rust
+legacy_signal_channel! {
     channel Message {
         operation Submit(Submission),
         operation Query(InboxQuery),

@@ -17,7 +17,9 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   prove behavior by grepping strings.
 - Use full English identifiers and keep reusable behavior on
   data-bearing types.
-- The `signal_channel!` macro lives in the sibling `signal-frame-macros`
-  proc-macro crate and is re-exported from this crate's `lib.rs`. It
-  declares contract-local operations directly:
-  `operation Submit(Submission)`, not `Assert Submit(Submission)`.
+- The `emit_schema!` macro lives in the sibling `signal-frame-macros`
+  proc-macro crate and is re-exported from this crate's `lib.rs`. It is
+  the schema-driven Rust composer entrypoint. The old handwritten macro
+  body is `legacy_signal_channel!` during the migration window;
+  `signal_channel!` is only a compatibility alias while existing
+  contracts move.
