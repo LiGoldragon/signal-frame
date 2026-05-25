@@ -174,17 +174,16 @@ impl<'schema> RustComposer<'schema> {
         let operation_variants = routes
             .iter()
             .map(|root| {
-                let root_ident = type_ident(root.root());
-                let endpoint_ident = endpoint_enum_ident(root.root());
+                let root_ident = type_ident(root.root);
+                let endpoint_ident = endpoint_enum_ident(root.root);
                 quote! { #root_ident(#endpoint_ident) }
             })
             .collect::<Vec<_>>();
         let log_arms = routes
             .iter()
             .map(|root| {
-                let root_ident = type_ident(root.root());
-                let endpoint_ident = endpoint_enum_ident(root.root());
-                let root_slot = u8_literal(root.root_slot(), root.root())?;
+                let root_ident = type_ident(root.root);
+                let root_slot = u8_literal(root.root_slot, root.root)?;
                 Ok(quote! {
                     Self::#root_ident(endpoint) => {
                         let endpoint_slot = endpoint.endpoint_slot();
