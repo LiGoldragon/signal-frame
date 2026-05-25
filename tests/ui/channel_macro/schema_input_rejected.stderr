@@ -1,0 +1,5 @@
+error: expected `channel`
+ --> tests/ui/channel_macro/schema_input_rejected.rs:3:17
+  |
+3 | signal_channel!([schema]);
+  |                 ^
