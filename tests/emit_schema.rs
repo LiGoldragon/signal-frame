@@ -4,7 +4,7 @@ signal_frame::emit_schema!("schema-rust/tests/fixtures/simple.schema");
 
 #[test]
 fn emit_schema_generates_route_table_from_schema_header() {
-    assert_eq!(simple::ROUTE_COUNT, 4);
+    assert_eq!(simple::ROUTE_COUNT, 3);
 
     let route = simple::route_for_short_header(
         simple::Leg::Ordinary,

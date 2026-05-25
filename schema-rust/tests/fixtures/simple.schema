@@ -1,21 +1,14 @@
 {}
-
-[
-  (State [Statement Declaration])
-  (Record [Entry])
-  (Observe [Records])
-]
-
+[(State (Statement Declaration)) (Record (Entry))]
 []
-
 []
-
 {
-  State (Idle Active)
-  Kind (Decision Principle Correction)
+  State ((Statement) (Declaration))
+  Record ((Entry))
 
   Topic [String]
   Text [String]
+  Kind (Decision Principle Correction)
   Summary [String]
   Context [String]
   Quote [String]
@@ -24,12 +17,6 @@
   Statement [Topic Text]
   Declaration [Topic Kind Text]
   Entry [Topic Kind Summary Context Quote]
-  RecordQuery [Topic Kind]
-  Records [RecordQuery]
   RecordAccepted [RecordIdentifier]
-  RecordsObserved [RecordIdentifier]
 }
-
-[
-  (Reply RecordAccepted RecordsObserved)
-]
+[(Reply RecordAccepted)]
