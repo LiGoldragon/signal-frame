@@ -66,7 +66,7 @@ pub fn signal_channel(input: TokenStream) -> TokenStream {
 }
 
 fn is_schema_marker(input: &TokenStream) -> bool {
-    input.to_string() == "[ schema ]"
+    input.to_string().replace(' ', "") == "[schema]"
 }
 
 fn expand_schema_signal_channel() -> TokenStream {
