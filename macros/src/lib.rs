@@ -39,6 +39,7 @@
 mod emit;
 mod model;
 mod parse;
+mod schema_reader;
 mod schema_entry;
 mod validate;
 
@@ -58,7 +59,25 @@ pub fn legacy_signal_channel(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn signal_channel(input: TokenStream) -> TokenStream {
+    if is_schema_marker(&input) {
+        return expand_schema_signal_channel();
+    }
     expand_legacy_signal_channel(input)
+}
+
+fn is_schema_marker(input: &TokenStream) -> bool {
+    input.to_string() == "[ schema ]"
+}
+
+fn expand_schema_signal_channel() -> TokenStream {
+    let spec = match schema_reader::read_default_schema() {
+        Ok(spec) => spec,
+        Err(error) => return error.into_compile_error().into(),
+    };
+    if let Err(error) = validate::validate(&spec) {
+        return error.into_compile_error().into();
+    }
+    emit::emit(&spec).into()
 }
 
 fn expand_legacy_signal_channel(input: TokenStream) -> TokenStream {
