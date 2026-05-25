@@ -400,7 +400,7 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
             async fn #method_name(
                 &mut self,
                 payload: #payload_type,
-            ) -> Result<#reply_name, Self::Error>;
+            ) -> ::std::result::Result<#reply_name, Self::Error>;
         }
     });
 
