@@ -23,3 +23,8 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   body is `legacy_signal_channel!` during the migration window;
   `signal_channel!` is only a compatibility alias while existing
   contracts move.
+- Schema-generated modules now include the first crystallized
+  architecture surfaces: prefix-preserving `ExtendedHeader`,
+  route-derived `Effect` vocabulary, `EffectTable`, `Interact`,
+  `InteractionActor`, and fan-out output scaffolding. Tests should
+  instantiate these generated types, not merely grep emitted tokens.

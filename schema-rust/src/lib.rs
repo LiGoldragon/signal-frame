@@ -68,23 +68,57 @@ impl<'schema> RustComposer<'schema> {
         let assembled = self.loaded.assembled();
         let type_items = self.type_items(assembled)?;
         let route_items = self.route_items(assembled)?;
+        let extended_header_items = self.extended_header_items();
+        let interaction_items = self.interaction_items(assembled);
         let operation_items = self.operation_items(assembled, Leg::Ordinary, "Operation")?;
         let owner_operation_items =
             self.operation_items(assembled, Leg::Owner, "OwnerOperation")?;
         let sema_operation_items = self.operation_items(assembled, Leg::Sema, "SemaOperation")?;
         let reply_items = self.reply_items(assembled)?;
         let event_items = self.event_items(assembled)?;
+        let effect_items = self.effect_items(
+            assembled,
+            Leg::Ordinary,
+            "Operation",
+            "Effect",
+            "FanOut",
+            "FanOutOutput",
+            "EffectTable",
+        )?;
+        let owner_effect_items = self.effect_items(
+            assembled,
+            Leg::Owner,
+            "OwnerOperation",
+            "OwnerEffect",
+            "OwnerFanOut",
+            "OwnerFanOutOutput",
+            "OwnerEffectTable",
+        )?;
+        let sema_effect_items = self.effect_items(
+            assembled,
+            Leg::Sema,
+            "SemaOperation",
+            "SemaEffect",
+            "SemaFanOut",
+            "SemaFanOutOutput",
+            "SemaEffectTable",
+        )?;
 
         let tokens = quote! {
             pub mod #module_ident {
                 pub const SCHEMA_PATH: &str = #schema_path;
 
                 #(#type_items)*
+                #interaction_items
                 #(#operation_items)*
                 #(#owner_operation_items)*
                 #(#sema_operation_items)*
                 #(#reply_items)*
                 #(#event_items)*
+                #(#effect_items)*
+                #(#owner_effect_items)*
+                #(#sema_effect_items)*
+                #extended_header_items
                 #route_items
             }
         };
@@ -268,6 +302,131 @@ impl<'schema> RustComposer<'schema> {
         }])
     }
 
+    fn interaction_items(&self, assembled: &AssembledSchema) -> TokenStream {
+        if assembled.routes().is_empty() {
+            return quote! {};
+        }
+
+        quote! {
+            pub trait Interact<Input> {
+                type Output;
+
+                fn interact(&mut self, input: Input) -> Self::Output;
+            }
+
+            pub trait InteractionActor<Input>: Interact<Input> {}
+
+            impl<Actor, Input> InteractionActor<Input> for Actor
+            where
+                Actor: Interact<Input>,
+            {
+            }
+        }
+    }
+
+    fn effect_items(
+        &self,
+        assembled: &AssembledSchema,
+        leg: Leg,
+        operation_name: &str,
+        effect_name: &str,
+        fan_out_name: &str,
+        fan_out_output_name: &str,
+        effect_table_name: &str,
+    ) -> Result<Vec<TokenStream>> {
+        let routes = routes_for_leg(assembled, leg);
+        if routes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let operation_ident = format_ident!("{operation_name}");
+        let effect_ident = format_ident!("{effect_name}");
+        let fan_out_ident = format_ident!("{fan_out_name}");
+        let fan_out_output_ident = format_ident!("{fan_out_output_name}");
+        let effect_table_ident = format_ident!("{effect_table_name}");
+        let root_effect_items = root_effect_items(&routes, effect_name)?;
+        let effect_variants = routes
+            .iter()
+            .map(|root| {
+                let root_ident = type_ident(root.root);
+                let root_effect_ident = effect_endpoint_enum_ident(effect_name, root.root);
+                quote! { #root_ident(#root_effect_ident) }
+            })
+            .collect::<Vec<_>>();
+        let effect_from_operation_arms = routes
+            .iter()
+            .map(|root| {
+                let root_ident = type_ident(root.root);
+                quote! {
+                    #operation_ident::#root_ident(endpoint) => {
+                        Self::#root_ident(endpoint.into())
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut fan_out_variants = vec![quote! { Effect(#effect_ident) }];
+        if has_reply_feature(assembled) {
+            fan_out_variants.push(quote! { Reply(Reply) });
+        }
+        if has_event_feature(assembled) {
+            fan_out_variants.push(quote! { Event(Event) });
+        }
+
+        let mut items = root_effect_items;
+        items.push(quote! {
+            #[derive(Clone, Debug, PartialEq, Eq)]
+            pub enum #effect_ident {
+                #(#effect_variants),*
+            }
+
+            impl From<#operation_ident> for #effect_ident {
+                fn from(operation: #operation_ident) -> Self {
+                    match operation {
+                        #(#effect_from_operation_arms),*
+                    }
+                }
+            }
+
+            #[derive(Clone, Debug, PartialEq, Eq)]
+            pub enum #fan_out_output_ident {
+                #(#fan_out_variants),*
+            }
+
+            #[derive(Clone, Debug, PartialEq, Eq)]
+            pub struct #fan_out_ident {
+                pub outputs: Vec<#fan_out_output_ident>,
+            }
+
+            impl #fan_out_ident {
+                pub fn new(outputs: Vec<#fan_out_output_ident>) -> Self {
+                    Self { outputs }
+                }
+
+                pub fn effect(effect: #effect_ident) -> Self {
+                    Self::new(vec![#fan_out_output_ident::Effect(effect)])
+                }
+            }
+
+            #[derive(Clone, Debug, Default, PartialEq, Eq)]
+            pub struct #effect_table_ident;
+
+            impl #effect_table_ident {
+                pub fn effect_for_operation(operation: #operation_ident) -> #effect_ident {
+                    operation.into()
+                }
+            }
+
+            impl Interact<#operation_ident> for #effect_table_ident {
+                type Output = #fan_out_ident;
+
+                fn interact(&mut self, input: #operation_ident) -> Self::Output {
+                    #fan_out_ident::effect(Self::effect_for_operation(input))
+                }
+            }
+        });
+        Ok(items)
+    }
+
     fn route_items(&self, assembled: &AssembledSchema) -> Result<TokenStream> {
         let route_literals = assembled
             .routes()
@@ -323,6 +482,60 @@ impl<'schema> RustComposer<'schema> {
                 }
             }
         })
+    }
+
+    fn extended_header_items(&self) -> TokenStream {
+        quote! {
+            pub const EXTENDED_HEADER_BYTE_COUNT: usize = 256;
+
+            #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+            pub struct ExtendedHeader {
+                bytes: [u8; EXTENDED_HEADER_BYTE_COUNT],
+            }
+
+            impl ExtendedHeader {
+                pub fn empty() -> Self {
+                    Self {
+                        bytes: [0; EXTENDED_HEADER_BYTE_COUNT],
+                    }
+                }
+
+                pub fn from_short_header(short_header: signal_frame::ShortHeader) -> Self {
+                    let mut bytes = [0; EXTENDED_HEADER_BYTE_COUNT];
+                    bytes[..signal_frame::SHORT_HEADER_BYTE_COUNT]
+                        .copy_from_slice(&short_header.to_le_bytes());
+                    Self { bytes }
+                }
+
+                pub fn short_header(&self) -> signal_frame::ShortHeader {
+                    signal_frame::ShortHeader::from_le_bytes([
+                        self.bytes[0],
+                        self.bytes[1],
+                        self.bytes[2],
+                        self.bytes[3],
+                        self.bytes[4],
+                        self.bytes[5],
+                        self.bytes[6],
+                        self.bytes[7],
+                    ])
+                }
+
+                pub fn as_bytes(&self) -> &[u8; EXTENDED_HEADER_BYTE_COUNT] {
+                    &self.bytes
+                }
+
+                pub fn into_bytes(self) -> [u8; EXTENDED_HEADER_BYTE_COUNT] {
+                    self.bytes
+                }
+            }
+
+            pub fn route_for_extended_header(
+                leg: Leg,
+                header: ExtendedHeader,
+            ) -> Option<RouteDescriptor> {
+                route_for_short_header(leg, header.short_header())
+            }
+        }
     }
 }
 
@@ -409,6 +622,54 @@ fn root_endpoint_item(root: &RootRoutes<'_>) -> Result<TokenStream> {
             pub const fn endpoint_slot(&self) -> u8 {
                 match self {
                     #(#slot_arms),*
+                }
+            }
+        }
+    })
+}
+
+fn root_effect_items(roots: &[RootRoutes<'_>], effect_name: &str) -> Result<Vec<TokenStream>> {
+    roots
+        .iter()
+        .map(|root| root_effect_item(root, effect_name))
+        .collect()
+}
+
+fn root_effect_item(root: &RootRoutes<'_>, effect_name: &str) -> Result<TokenStream> {
+    let endpoint_ident = endpoint_enum_ident(root.root);
+    let effect_ident = effect_endpoint_enum_ident(effect_name, root.root);
+    let effect_variants = root
+        .routes
+        .iter()
+        .map(|route| endpoint_variant_tokens(route.endpoint().name(), route.body()))
+        .collect::<Result<Vec<_>>>()?;
+    let conversion_arms = root
+        .routes
+        .iter()
+        .map(|route| {
+            let variant_ident = type_ident(route.endpoint().name());
+            let arm = match route.body() {
+                RouteBody::Unit => quote! {
+                    #endpoint_ident::#variant_ident => Self::#variant_ident
+                },
+                RouteBody::Type(_) => quote! {
+                    #endpoint_ident::#variant_ident(payload) => Self::#variant_ident(payload)
+                },
+            };
+            Ok(arm)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(quote! {
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub enum #effect_ident {
+            #(#effect_variants),*
+        }
+
+        impl From<#endpoint_ident> for #effect_ident {
+            fn from(endpoint: #endpoint_ident) -> Self {
+                match endpoint {
+                    #(#conversion_arms),*
                 }
             }
         }
@@ -550,6 +811,28 @@ fn endpoint_enum_ident(name: &Name) -> Ident {
     format_ident!("{}Endpoint", name.as_str())
 }
 
+fn effect_endpoint_enum_ident(effect_name: &str, root: &Name) -> Ident {
+    let root = root.as_str();
+    match effect_name.strip_suffix("Effect") {
+        Some("") | None => format_ident!("{root}Effect"),
+        Some(prefix) => format_ident!("{prefix}{root}Effect"),
+    }
+}
+
+fn has_reply_feature(assembled: &AssembledSchema) -> bool {
+    assembled
+        .features()
+        .iter()
+        .any(|feature| matches!(feature, Feature::Reply(_)))
+}
+
+fn has_event_feature(assembled: &AssembledSchema) -> bool {
+    assembled
+        .features()
+        .iter()
+        .any(|feature| matches!(feature, Feature::Event(_)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,6 +848,10 @@ mod tests {
         assert!(text.contains("pub mod simple"));
         assert!(text.contains("pub enum Operation"));
         assert!(text.contains("pub enum StateEndpoint"));
+        assert!(text.contains("pub enum Effect"));
+        assert!(text.contains("pub struct EffectTable"));
+        assert!(text.contains("pub trait Interact"));
+        assert!(text.contains("pub struct ExtendedHeader"));
         assert!(text.contains("pub const ROUTES"));
     }
 }

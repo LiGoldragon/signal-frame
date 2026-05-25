@@ -26,6 +26,12 @@ wire-contract verbs.
 signal_frame::emit_schema!("spirit.schema");
 ```
 
+The generated module includes the first schema-crystallized runtime
+surfaces: `ShortHeader` route projection, a prefix-preserving
+`ExtendedHeader`, an internal `Effect` vocabulary, an `EffectTable`
+mapping from external `Operation` to internal `Effect`, and
+`Interact` / `InteractionActor` fan-out scaffolding.
+
 During migration, `legacy_signal_channel!` keeps the old handwritten
 macro body grammar alive for contracts that have not moved to schema:
 

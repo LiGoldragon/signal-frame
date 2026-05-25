@@ -35,6 +35,55 @@ fn emit_schema_generates_short_header_projection_from_schema_slots() {
 }
 
 #[test]
+fn emit_schema_generates_prefix_preserving_extended_header_projection() {
+    let short = ShortHeader::new(u64::from_le_bytes([0, 1, 0, 0, 0, 0, 0, 0]));
+    let extended = simple::ExtendedHeader::from_short_header(short);
+
+    assert_eq!(extended.short_header(), short);
+    assert_eq!(&extended.as_bytes()[..8], &short.to_le_bytes());
+    assert_eq!(
+        extended.as_bytes().len(),
+        simple::EXTENDED_HEADER_BYTE_COUNT
+    );
+
+    let route = simple::route_for_extended_header(simple::Leg::Ordinary, extended)
+        .expect("extended header preserves short route lookup");
+    assert_eq!(route.root, "State");
+    assert_eq!(route.endpoint, "Declaration");
+}
+
+#[test]
+fn emit_schema_generates_effect_table_and_interaction_actor_scaffold() {
+    fn assert_interaction_actor<Actor>(_: &Actor)
+    where
+        Actor: simple::InteractionActor<simple::Operation, Output = simple::FanOut>,
+    {
+    }
+
+    let operation =
+        simple::Operation::State(simple::StateEndpoint::Declaration(simple::Declaration {
+            topic: simple::Topic("schema".to_string()),
+            kind: simple::Kind::Principle,
+            text: simple::Text("schema maps messages to effects".to_string()),
+        }));
+    let mut table = simple::EffectTable;
+
+    assert_interaction_actor(&table);
+
+    let fan_out = simple::Interact::interact(&mut table, operation);
+    assert_eq!(fan_out.outputs.len(), 1);
+
+    let simple::FanOutOutput::Effect(simple::Effect::State(simple::StateEffect::Declaration(
+        declaration,
+    ))) = &fan_out.outputs[0]
+    else {
+        panic!("expected declaration effect fan-out");
+    };
+    assert_eq!(declaration.topic.0, "schema");
+    assert_eq!(declaration.kind, simple::Kind::Principle);
+}
+
+#[test]
 fn emit_schema_generates_positional_struct_fields_from_type_names() {
     let entry = simple::Entry {
         topic: simple::Topic("schema".to_string()),

@@ -8,6 +8,12 @@ structured schema data, lowers through the `schema` crate, and delegates
 Rust emission to `schema-rust`. It must not route through the legacy
 `ChannelSpec` model.
 
+Current schema emission covers both the route surface and the first
+effect-language scaffold: `Operation` / endpoint enums, route lookup,
+`ExtendedHeader`, `Effect`, `EffectTable`, `Interact`,
+`InteractionActor`, and fan-out output records. The old handwritten
+macro path does not emit these schema-crystallized surfaces.
+
 `legacy_signal_channel!` is the old handwritten channel declaration
 grammar. It remains only while existing contracts migrate to schema.
 `signal_channel!` is a compatibility alias for that old path.
