@@ -364,7 +364,7 @@ fn emit_log_variant_impl(spec: &ChannelSpec) -> TokenStream {
                 .map(|(schema, payload)| {
                     emit_slots_for_named_type(schema, &payload, quote!(payload), 1).tokens
                 })
-                .unwrap_or_else(TokenStream::new);
+                .unwrap_or_default();
             quote! {
                 Self::#variant_name(payload) => {
                     bytes[0] = #index;
