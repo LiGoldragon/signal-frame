@@ -6,8 +6,9 @@ This repo follows the primary workspace contract. Read:
 2. `/home/li/primary/lore/AGENTS.md`
 3. `/home/li/primary/skills/rust-discipline.md`
 4. `/home/li/primary/skills/contract-repo.md`
-5. `ARCHITECTURE.md`
-6. `skills.md`
+5. `INTENT.md`
+6. `ARCHITECTURE.md`
+7. `skills.md`
 
 `signal-frame` is the frame-mechanics contract repo, renamed from the
 former `signal-core`. Keep runtime actors, reducers, stores, terminal

@@ -27,11 +27,11 @@ flowchart TB
     frame["signal-frame<br/>(frame kernel)"]
     sema["signal-sema<br/>(Sema verbs)"]
     components["signal-&lt;component&gt;<br/>(per-component contracts)"]
-    owners["owner-signal-&lt;component&gt;<br/>(owner contracts)"]
+    meta["meta-signal-&lt;component&gt;<br/>(meta policy contracts)"]
 
     frame --> sema
     frame --> components
-    frame --> owners
+    frame --> meta
 ```
 
 Components depend on `signal-frame` for the wire kernel and on
@@ -127,7 +127,7 @@ executor lowering, logging, introspection).
   `CommandLineSockets`, `CommandLineDispatch`, `ClientShape`, and
   `signal_cli!` — the shared thin-CLI frame client. It enforces the
   single-argument rule, parses the argument as NOTA text or a file path,
-  dispatches request heads to working vs owner sockets, injects
+  dispatches request heads to ordinary vs meta sockets, injects
   `Caller::from_kernel()`, sends length-prefixed frames, and renders the
   typed reply payload back to NOTA. Component crates still own their
   domain records, socket deployment paths, daemon behavior, and
@@ -315,17 +315,17 @@ subscription boundary. Per spirit record 326 (correction superseding
 the shared-workspace-enum framing this section originally carried)
 and detailed in `reports/designer/305-v2-design-64bit-signal-per-component-namespacing.md`.
 
-**Byte-0 split between owner and ordinary contracts** (per spirit
+**Byte-0 split between meta and ordinary contracts** (per spirit
 record 327, under detailed design): for a component triad, the
-ordinary `signal-<comp>` contract and the owner `owner-signal-<comp>`
+ordinary `signal-<comp>` contract and the meta `meta-signal-<comp>`
 contract each claim a SECTION of the 256-variant byte-0 space,
 divided at the golden ratio (~0.39 / 0.61). The macro enforces
 compile-time agreement between the two contracts (both must agree
 on which side is the small section and which is the big — if both
-claim the same side, compilation fails). Default: owner contract
+claim the same side, compilation fails). Default: meta contract
 takes the small section, ordinary contract takes the big. The split
 opens the potential for single-socket-per-component dispatch where
-the byte-0 section IS the owner-vs-ordinary discriminator (Medium
+the byte-0 section IS the meta-vs-ordinary discriminator (Medium
 certainty exploration). Detailed mechanism lands in
 `reports/designer/307-design-golden-ratio-namespace-split.md` once
 that design completes.
@@ -429,7 +429,7 @@ dropping into Tier 3.**
 | Short string up to ~60 bytes + length prefix | exact |
 | Eight `u64`s | exact |
 | Two `ContractVersion` (32 each) | exact |
-| `ComponentName` + `Version` + a couple of enum tags | natural for owner-signal-version-handover summaries |
+| `ComponentName` + `Version` + a couple of enum tags | natural for meta-signal-version-handover summaries |
 
 The `LogSummary` trait carries a const-generic compile-time size
 check (`size_of::<Self::Summary>() <= 64`). Over-budget summaries

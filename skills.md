@@ -11,7 +11,7 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   contract-local verb. There is no per-operation kernel wrapper.
 - Keep daemon/runtime code out: no actors, tokio loops, redb stores, or
   terminal adapters. Shared thin-CLI frame machinery belongs here when
-  it is domain-free: single-argument parsing, working-vs-owner socket
+  it is domain-free: single-argument parsing, ordinary-vs-meta socket
   routing, caller capture, frame send/receive, and NOTA reply rendering.
 - Add tests that round-trip real typed frames through rkyv. Do not
   prove behavior by grepping strings.
