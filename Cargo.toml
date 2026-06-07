@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "macros", "schema-rust"]
+members = [".", "macros"]
 resolver = "2"
 
 [package]

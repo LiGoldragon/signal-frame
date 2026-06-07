@@ -44,15 +44,15 @@
             inherit cargoArtifacts;
           });
 
-          schema-macro-does-not-use-legacy-emitter = pkgs.runCommand
-            "schema-macro-does-not-use-legacy-emitter"
+          old-schema-composer-removed = pkgs.runCommand
+            "old-schema-composer-removed"
             { }
             ''
-              if ${pkgs.ripgrep}/bin/rg -n \
-                "ChannelSpec|schema_reader|emit::emit|crate::emit|crate::model" \
-                ${src}/schema-rust/src ${src}/macros/src/schema_entry.rs
+              if test -d ${src}/schema-rust || \
+                 ${pkgs.ripgrep}/bin/rg -n "emit_schema|schema_rust|^schema-rust[[:space:]]*=|^schema[[:space:]]*=" \
+                   ${src}/Cargo.toml ${src}/macros/Cargo.toml ${src}/src ${src}/macros/src
               then
-                echo "emit_schema/schema-rust path must not use the legacy ChannelSpec emitter" >&2
+                echo "signal-frame must not carry the retired local schema-rust / emit_schema path" >&2
                 exit 1
               fi
               touch $out

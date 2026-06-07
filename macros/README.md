@@ -1,18 +1,11 @@
 # signal-frame-macros
 
-Proc-macro front door for `emit_schema!` and the migration-only
-`legacy_signal_channel!`.
+Proc-macro front door for `signal_channel!` and the migration-named
+alias `legacy_signal_channel!`.
 
-`emit_schema!` is the schema-driven Rust composer entrypoint. It reads
-structured schema data, lowers through the `schema` crate, and delegates
-Rust emission to `schema-rust`. It must not route through the legacy
-`ChannelSpec` model.
-
-Current schema emission covers both the route surface and the first
-effect-language scaffold: `Operation` / endpoint enums, route lookup,
-`ExtendedHeader`, `Effect`, `EffectTable`, `Interact`,
-`InteractionActor`, and fan-out output records. The old handwritten
-macro path does not emit these schema-crystallized surfaces.
+Schema-driven Rust generation lives in `schema-rust-next` build
+generation. This proc-macro crate keeps the current hand-written
+contract declaration grammar alive while contracts migrate.
 
 `legacy_signal_channel!` is the old handwritten channel declaration
 grammar. It remains only while existing contracts migrate to schema.

@@ -4,16 +4,13 @@
 //! `observable` block, also injects observer-subscription operations,
 //! an `ObserverStream`, and the runtime publish surface.
 
-use std::collections::BTreeSet;
-
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse_quote;
 
 use crate::model::{
     ChannelSpec, EventBlockSpec, EventVariantSpec, FilterDecl, ObservableBlockSpec, ReplyBlockSpec,
-    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, SchemaDefinition, SchemaField,
-    SchemaSpec, SchemaType, SchemaVariant, StreamBlockSpec,
+    ReplyVariantSpec, RequestBlockSpec, RequestVariantSpec, StreamBlockSpec,
 };
 
 pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
@@ -43,7 +40,6 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
     let frame_aliases = emit_frame_aliases(&augmented);
     let frame_builders = emit_frame_builders(&augmented);
     let nota_codecs = emit_nota_codecs(&augmented);
-    let boxed_nota_codecs = emit_boxed_nota_codecs(&augmented);
 
     quote! {
         #request_enum
@@ -59,7 +55,6 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
         #frame_aliases
         #frame_builders
         #nota_codecs
-        #boxed_nota_codecs
         #observable_runtime
     }
 }
@@ -167,7 +162,6 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
         event,
         streams,
         observable: None,
-        schema: spec.schema.clone(),
     }
 }
 
@@ -199,7 +193,6 @@ fn clone_channel_spec(spec: &ChannelSpec) -> ChannelSpec {
         }),
         streams: clone_streams(&spec.streams),
         observable: None,
-        schema: spec.schema.clone(),
     }
 }
 
@@ -355,21 +348,10 @@ fn emit_log_variant_impl(spec: &ChannelSpec) -> TokenStream {
         .map(|(index, variant)| {
             let variant_name = &variant.variant_name;
             let index = index as u8;
-            let slots = spec
-                .schema
-                .as_ref()
-                .and_then(|schema| {
-                    type_name_from_syn(&variant.payload_type).map(|payload| (schema, payload))
-                })
-                .map(|(schema, payload)| {
-                    emit_slots_for_named_type(schema, &payload, quote!(payload), 1).tokens
-                })
-                .unwrap_or_default();
             quote! {
                 Self::#variant_name(payload) => {
                     bytes[0] = #index;
                     let _ = payload;
-                    #slots
                 }
             }
         });
@@ -469,200 +451,6 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
         {
         }
     }
-}
-
-struct SlotEmission {
-    tokens: TokenStream,
-    next_slot: usize,
-}
-
-fn emit_slots_for_named_type(
-    schema: &SchemaSpec,
-    type_name: &str,
-    expression: TokenStream,
-    next_slot: usize,
-) -> SlotEmission {
-    if next_slot > 7 || is_primitive(type_name) {
-        return SlotEmission {
-            tokens: TokenStream::new(),
-            next_slot,
-        };
-    }
-    let Some(definition) = schema.definitions.get(type_name) else {
-        return SlotEmission {
-            tokens: TokenStream::new(),
-            next_slot,
-        };
-    };
-    if let Some(alias) = &definition.alias {
-        return emit_slots_for_schema_type(schema, alias, expression, next_slot);
-    }
-    if is_leaf_enum(definition) {
-        let slot = syn::Index::from(next_slot);
-        return SlotEmission {
-            tokens: quote! {
-                bytes[#slot] = #expression as u8;
-            },
-            next_slot: next_slot + 1,
-        };
-    }
-    if let Some(fields) = single_variant_fields(definition) {
-        return emit_struct_field_slots(schema, fields, expression, next_slot);
-    }
-    emit_mixed_enum_slots(schema, definition, expression, next_slot)
-}
-
-fn emit_slots_for_schema_type(
-    schema: &SchemaSpec,
-    schema_type: &SchemaType,
-    expression: TokenStream,
-    next_slot: usize,
-) -> SlotEmission {
-    match schema_type {
-        SchemaType::Named(name) => emit_slots_for_named_type(schema, name, expression, next_slot),
-        SchemaType::Vec(_) | SchemaType::Option(_) => SlotEmission {
-            tokens: TokenStream::new(),
-            next_slot,
-        },
-    }
-}
-
-fn emit_struct_field_slots(
-    schema: &SchemaSpec,
-    fields: &[SchemaField],
-    expression: TokenStream,
-    mut next_slot: usize,
-) -> SlotEmission {
-    let mut tokens = TokenStream::new();
-    for field in fields {
-        let Some(field_name) = field_name_for_field(field) else {
-            continue;
-        };
-        let field_ident = format_ident!("{}", field_name);
-        let emission = emit_slots_for_schema_type(
-            schema,
-            &field.schema_type,
-            quote!(#expression.#field_ident),
-            next_slot,
-        );
-        next_slot = emission.next_slot;
-        tokens.extend(emission.tokens);
-        if next_slot > 7 {
-            break;
-        }
-    }
-    SlotEmission { tokens, next_slot }
-}
-
-fn emit_mixed_enum_slots(
-    schema: &SchemaSpec,
-    definition: &SchemaDefinition,
-    expression: TokenStream,
-    next_slot: usize,
-) -> SlotEmission {
-    if next_slot > 7 {
-        return SlotEmission {
-            tokens: TokenStream::new(),
-            next_slot,
-        };
-    }
-    let enum_name = format_ident!("{}", definition.name);
-    let slot = syn::Index::from(next_slot);
-    let mut furthest_slot = next_slot + 1;
-    let arms = definition
-        .variants
-        .iter()
-        .enumerate()
-        .map(|(index, variant)| match variant {
-            SchemaVariant::Unit { name } => {
-                let variant = format_ident!("{}", name);
-                let index = index as u8;
-                quote! {
-                    #enum_name::#variant => {
-                        bytes[#slot] = #index;
-                    }
-                }
-            }
-            SchemaVariant::Data { name, fields, .. } => {
-                let variant = format_ident!("{}", name);
-                let payload = format_ident!("payload_{}", next_slot);
-                let index = index as u8;
-                let nested = if fields.len() == 1 {
-                    let emission = emit_slots_for_schema_type(
-                        schema,
-                        &fields[0].schema_type,
-                        quote!(#payload),
-                        next_slot + 1,
-                    );
-                    furthest_slot = furthest_slot.max(emission.next_slot);
-                    emission.tokens
-                } else {
-                    TokenStream::new()
-                };
-                quote! {
-                    #enum_name::#variant(#payload) => {
-                        bytes[#slot] = #index;
-                        #nested
-                    }
-                }
-            }
-        });
-
-    SlotEmission {
-        tokens: quote! {
-            match #expression {
-                #( #arms, )*
-            }
-        },
-        next_slot: furthest_slot,
-    }
-}
-
-fn is_leaf_enum(definition: &SchemaDefinition) -> bool {
-    definition
-        .variants
-        .iter()
-        .all(|variant| matches!(variant, SchemaVariant::Unit { .. }))
-}
-
-fn single_variant_fields(definition: &SchemaDefinition) -> Option<&[SchemaField]> {
-    match definition.variants.as_slice() {
-        [SchemaVariant::Data { name, fields, .. }] if name == &definition.name => Some(fields),
-        _ => None,
-    }
-}
-
-fn field_name_for_field(field: &SchemaField) -> Option<String> {
-    if let Some(name) = &field.name {
-        return Some(name.clone());
-    }
-    field_name_for_type(&field.schema_type)
-}
-
-fn field_name_for_type(schema_type: &SchemaType) -> Option<String> {
-    let name = match schema_type {
-        SchemaType::Named(name) => name,
-        SchemaType::Option(inner) => return field_name_for_type(inner),
-        SchemaType::Vec(_) => return None,
-    };
-    Some(to_snake_case(name))
-}
-
-fn is_primitive(type_name: &str) -> bool {
-    matches!(
-        type_name,
-        "String" | "u8" | "u16" | "u32" | "u64" | "bool" | "Date" | "Time" | "Bytes"
-    )
-}
-
-fn type_name_from_syn(ty: &syn::Type) -> Option<String> {
-    let syn::Type::Path(path) = ty else {
-        return None;
-    };
-    path.path
-        .segments
-        .last()
-        .map(|segment| segment.ident.to_string())
 }
 
 fn to_snake_case(name: &str) -> String {
@@ -957,312 +745,6 @@ fn emit_nota_codecs(spec: &ChannelSpec) -> TokenStream {
         #request_codec
         #reply_codec
         #event_codec
-    }
-}
-
-fn emit_boxed_nota_codecs(spec: &ChannelSpec) -> TokenStream {
-    let Some(schema) = &spec.schema else {
-        return TokenStream::new();
-    };
-
-    let emitted_names = request_payload_schema_names(spec, schema);
-    schema
-        .definitions
-        .values()
-        .filter(|definition| emitted_names.contains(&definition.name))
-        .filter_map(|definition| emit_boxed_nota_codec(schema, definition))
-        .collect()
-}
-
-fn request_payload_schema_names(spec: &ChannelSpec, schema: &SchemaSpec) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for variant in &spec.request.variants {
-        if let Some(name) = type_name_from_syn(&variant.payload_type) {
-            collect_schema_name(schema, &name, &mut names);
-        }
-    }
-    names
-}
-
-fn collect_schema_name(schema: &SchemaSpec, name: &str, names: &mut BTreeSet<String>) {
-    if is_primitive(name) || !names.insert(name.to_string()) {
-        return;
-    }
-    let Some(definition) = schema.definitions.get(name) else {
-        return;
-    };
-    if let Some(alias) = &definition.alias {
-        collect_schema_type(schema, alias, names);
-    }
-    for variant in &definition.variants {
-        if let SchemaVariant::Data { fields, .. } = variant {
-            for field in fields {
-                collect_schema_type(schema, &field.schema_type, names);
-            }
-        }
-    }
-}
-
-fn collect_schema_type(schema: &SchemaSpec, schema_type: &SchemaType, names: &mut BTreeSet<String>) {
-    match schema_type {
-        SchemaType::Named(name) => collect_schema_name(schema, name, names),
-        SchemaType::Vec(inner) | SchemaType::Option(inner) => {
-            collect_schema_type(schema, inner, names);
-        }
-    }
-}
-
-struct BoxedFieldPlan<'schema> {
-    index: usize,
-    field_ident: syn::Ident,
-    field_type: &'schema SchemaType,
-    boxed: bool,
-}
-
-fn emit_boxed_nota_codec(
-    schema: &SchemaSpec,
-    definition: &SchemaDefinition,
-) -> Option<TokenStream> {
-    if should_skip_boxed_codec(definition) {
-        return None;
-    }
-    let fields = single_variant_fields(definition)?;
-    let plan = boxed_field_plan(schema, fields)?;
-    if !plan.iter().any(|field| field.boxed) {
-        return None;
-    }
-
-    let type_name = format_ident!("{}", definition.name);
-    let type_name_text = definition.name.clone();
-    let box_count = plan.iter().filter(|field| field.boxed).count();
-    let root_fields = plan.iter().filter(|field| !field.boxed);
-    let box_fields = plan.iter().filter(|field| field.boxed);
-    let decode_root_fields = plan.iter().filter(|field| !field.boxed);
-    let decode_box_fields = plan.iter().filter(|field| field.boxed);
-    let construct_fields = plan
-        .iter()
-        .map(|field| field.field_ident.clone())
-        .collect::<Vec<_>>();
-
-    let encode_root_fields = root_fields.map(|field| {
-        let field_ident = &field.field_ident;
-        quote! {
-            self.#field_ident.encode(encoder)?;
-        }
-    });
-    let encode_box_arms = box_fields.map(|field| {
-        let field_ident = &field.field_ident;
-        let box_index = syn::Index::from(field.index);
-        quote! {
-            #box_index => self.#field_ident.encode(encoder),
-        }
-    });
-    let decode_root_statements = decode_root_fields.map(|field| {
-        let field_ident = &field.field_ident;
-        let field_type = schema_type_tokens(field.field_type)?;
-        Some(quote! {
-            let #field_ident = <#field_type as ::nota_codec::NotaDecode>::decode(&mut root_decoder)?;
-        })
-    }).collect::<Option<Vec<_>>>()?;
-    let decode_binary_box_statements = decode_box_fields
-        .map(|field| {
-            let field_ident = &field.field_ident;
-            let field_type = schema_type_tokens(field.field_type)?;
-            let box_index = syn::Index::from(field.index);
-            Some(quote! {
-                let #field_ident = ::nota_box::decode_binary_box::<#field_type>(
-                    decoder.read_box(#box_index)?
-                )?;
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    let decode_text_box_statements = plan
-        .iter()
-        .filter(|field| field.boxed)
-        .map(|field| {
-            let field_ident = &field.field_ident;
-            let field_type = schema_type_tokens(field.field_type)?;
-            let box_index = syn::Index::from(field.index);
-            Some(quote! {
-                let #field_ident = ::nota_box::decode_text_box::<#field_type>(
-                    &boxes[#box_index]
-                )?;
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-
-    Some(quote! {
-        impl ::nota_box::BoxedNotaEncode for #type_name {
-            fn encode_root(
-                &self,
-                encoder: &mut ::nota_codec::Encoder,
-            ) -> Result<(), ::nota_codec::Error> {
-                // DESIGN-DECISION-REVIEW (designer/323 §3.3):
-                // length-prefixed boxes are emitted in declaration
-                // order while fixed fields stay in the root.
-                encoder.start_record(#type_name_text)?;
-                #( #encode_root_fields )*
-                encoder.end_record()
-            }
-
-            fn box_count(&self) -> usize {
-                #box_count
-            }
-
-            fn encode_box(
-                &self,
-                index: usize,
-                encoder: &mut ::nota_codec::Encoder,
-            ) -> Result<(), ::nota_codec::Error> {
-                match index {
-                    #( #encode_box_arms )*
-                    _ => Err(::nota_codec::Error::UnexpectedEnd {
-                        while_parsing: "boxed NOTA field",
-                    }),
-                }
-            }
-        }
-
-        impl ::nota_box::BoxedNotaDecode for #type_name {
-            fn decode_full_binary(bytes: &[u8]) -> Result<Self, ::nota_box::Error> {
-                let root_length = ::nota_box::root_text_length(bytes)?;
-                let decoder = ::nota_box::BoxedNotaDecoder::new(bytes, root_length)?;
-                let root = std::str::from_utf8(decoder.root())?;
-                let mut root_decoder = ::nota_codec::Decoder::new(root);
-                root_decoder.expect_record_head(#type_name_text)?;
-                #( #decode_root_statements )*
-                root_decoder.expect_record_end()?;
-                #( #decode_binary_box_statements )*
-                Ok(Self {
-                    #( #construct_fields, )*
-                })
-            }
-
-            fn decode_full_text(text: &str) -> Result<Self, ::nota_box::Error> {
-                let root_end = ::nota_box::root_text_end(text)?;
-                let (root, boxes) = ::nota_box::split_text_boxes(text, root_end, #box_count)?;
-                let mut root_decoder = ::nota_codec::Decoder::new(root);
-                root_decoder.expect_record_head(#type_name_text)?;
-                #( #decode_root_statements )*
-                root_decoder.expect_record_end()?;
-                #( #decode_text_box_statements )*
-                Ok(Self {
-                    #( #construct_fields, )*
-                })
-            }
-        }
-    })
-}
-
-fn should_skip_boxed_codec(definition: &SchemaDefinition) -> bool {
-    matches!(
-        definition.name.as_str(),
-        "Operation"
-            | "Reply"
-            | "Event"
-            | "OperationKind"
-            | "ReplyKind"
-            | "EventKind"
-            | "StreamKind"
-            | "ObserverFilter"
-            | "ObserverSubscriptionToken"
-            | "ObserverSubscriptionOpened"
-    ) || definition.alias.is_some()
-        || is_leaf_enum(definition)
-}
-
-fn boxed_field_plan<'schema>(
-    schema: &SchemaSpec,
-    fields: &'schema [SchemaField],
-) -> Option<Vec<BoxedFieldPlan<'schema>>> {
-    let mut box_index = 0usize;
-    let mut plan = Vec::with_capacity(fields.len());
-    for field in fields {
-        let field_name = field_name_for_field(field)?;
-        if field_name == "u8"
-            || field_name == "u16"
-            || field_name == "u32"
-            || field_name == "u64"
-            || field_name == "bool"
-            || field_name == "string"
-            || field_name == "bytes"
-        {
-            return None;
-        }
-        let boxed = !is_fixed_schema_type(schema, &field.schema_type, &mut BTreeSet::new());
-        let index = if boxed {
-            let current = box_index;
-            box_index += 1;
-            current
-        } else {
-            0
-        };
-        plan.push(BoxedFieldPlan {
-            index,
-            field_ident: format_ident!("{}", field_name),
-            field_type: &field.schema_type,
-            boxed,
-        });
-    }
-    Some(plan)
-}
-
-fn is_fixed_schema_type(
-    schema: &SchemaSpec,
-    schema_type: &SchemaType,
-    visiting: &mut BTreeSet<String>,
-) -> bool {
-    match schema_type {
-        SchemaType::Named(name) => is_fixed_named_type(schema, name, visiting),
-        SchemaType::Vec(_) | SchemaType::Option(_) => false,
-    }
-}
-
-fn is_fixed_named_type(schema: &SchemaSpec, name: &str, visiting: &mut BTreeSet<String>) -> bool {
-    match name {
-        "u8" | "u16" | "u32" | "u64" | "bool" | "Date" | "Time" => return true,
-        "String" | "Bytes" => return false,
-        _ => {}
-    }
-    if !visiting.insert(name.to_string()) {
-        return false;
-    }
-    let fixed = schema
-        .definitions
-        .get(name)
-        .map(|definition| {
-            if let Some(alias) = &definition.alias {
-                return is_fixed_schema_type(schema, alias, visiting);
-            }
-            if is_leaf_enum(definition) {
-                return true;
-            }
-            definition.variants.iter().all(|variant| match variant {
-                SchemaVariant::Unit { .. } => true,
-                SchemaVariant::Data { fields, .. } => fields
-                    .iter()
-                    .all(|field| is_fixed_schema_type(schema, &field.schema_type, visiting)),
-            })
-        })
-        .unwrap_or(false);
-    visiting.remove(name);
-    fixed
-}
-
-fn schema_type_tokens(schema_type: &SchemaType) -> Option<TokenStream> {
-    match schema_type {
-        SchemaType::Named(name) => {
-            let ident = format_ident!("{}", name);
-            Some(quote!(#ident))
-        }
-        SchemaType::Vec(inner) => {
-            let inner = schema_type_tokens(inner)?;
-            Some(quote!(Vec<#inner>))
-        }
-        SchemaType::Option(inner) => {
-            let inner = schema_type_tokens(inner)?;
-            Some(quote!(Option<#inner>))
-        }
     }
 }
 

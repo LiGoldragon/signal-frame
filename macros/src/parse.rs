@@ -88,7 +88,6 @@ impl Parse for ChannelSpec {
             event,
             streams,
             observable,
-            schema: None,
         })
     }
 }

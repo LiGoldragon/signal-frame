@@ -11,12 +11,10 @@
 //! `Subscribe`, `Validate`) live in the sibling crate `signal-sema`,
 //! not here.
 //!
-//! The `emit_schema!` macro lives in the sibling
-//! `signal-frame-macros` crate and is re-exported from this crate.
-//! It is the schema-driven Rust composer entrypoint. The old
-//! handwritten macro body remains available as `legacy_signal_channel!`
-//! during the migration window; `signal_channel!` is retained as a
-//! compatibility alias for existing callsites.
+//! The `signal_channel!` macro lives in the sibling
+//! `signal-frame-macros` crate and is re-exported from this crate for
+//! hand-written contracts that have not yet moved to
+//! `schema-rust-next` build generation.
 //!
 //! `signal_cli!` emits thin component CLI binaries over the shared frame
 //! client path.
@@ -70,4 +68,4 @@ pub use version::{
 };
 
 pub use paste;
-pub use signal_frame_macros::{emit_schema, legacy_signal_channel, signal_channel};
+pub use signal_frame_macros::{legacy_signal_channel, signal_channel};

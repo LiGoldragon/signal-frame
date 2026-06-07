@@ -17,14 +17,7 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   prove behavior by grepping strings.
 - Use full English identifiers and keep reusable behavior on
   data-bearing types.
-- The `emit_schema!` macro lives in the sibling `signal-frame-macros`
-  proc-macro crate and is re-exported from this crate's `lib.rs`. It is
-  the schema-driven Rust composer entrypoint. The old handwritten macro
-  body is `legacy_signal_channel!` during the migration window;
-  `signal_channel!` is only a compatibility alias while existing
-  contracts move.
-- Schema-generated modules now include the first crystallized
-  architecture surfaces: prefix-preserving `ExtendedHeader`,
-  route-derived `Effect` vocabulary, `EffectTable`, `Interact`,
-  `InteractionActor`, and fan-out output scaffolding. Tests should
-  instantiate these generated types, not merely grep emitted tokens.
+- Schema-driven Rust generation lives in `schema-rust-next` build
+  generation, not in `signal-frame`. This crate re-exports
+  `signal_channel!` for current hand-written contracts while those
+  contracts migrate.

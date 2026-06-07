@@ -5,7 +5,7 @@ edition      = "2024"
 rust-version = "1.85"
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/LiGoldragon/signal-frame"
-description  = "Proc-macro front door for emit_schema! plus migration-only legacy_signal_channel!."
+description  = "Proc-macro front door for signal_channel! hand-written contract declarations."
 publish      = false
 
 [lib]
@@ -17,8 +17,6 @@ proc-macro = true
 nota-codec  = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
 proc-macro2 = "1"
 quote       = "1"
-schema      = { git = "https://github.com/LiGoldragon/schema.git", branch = "main" }
-schema-rust = { version = "0.1", path = "../schema-rust" }
 syn         = { version = "2", features = ["full", "extra-traits"] }
 
 [lints.rust]

@@ -5,79 +5,14 @@ use std::collections::HashSet;
 
 use syn::{Error, Type};
 
-use crate::model::{ChannelSpec, SchemaSpec, SchemaType, SchemaVariant};
+use crate::model::ChannelSpec;
 
 pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
-    validate_schema_roots(spec)?;
     validate_observable_does_not_collide(spec)?;
     validate_variant_uniqueness(spec)?;
     validate_record_head_uniqueness(spec)?;
     validate_stream_relations(spec)?;
     Ok(())
-}
-
-fn validate_schema_roots(spec: &ChannelSpec) -> syn::Result<()> {
-    let Some(schema) = &spec.schema else {
-        return Ok(());
-    };
-    for required in ["Operation", "Reply"] {
-        if !schema.definitions.contains_key(required) {
-            return Err(Error::new_spanned(
-                &spec.name,
-                format!("NOTA schema input is missing required `{required}` root enum"),
-            ));
-        }
-    }
-    if spec.event.is_some() && !schema.definitions.contains_key("Event") {
-        return Err(Error::new_spanned(
-            &spec.name,
-            "streaming NOTA schema input has event payloads but no `Event` root enum",
-        ));
-    }
-    for definition in schema.definitions.values() {
-        if definition.variants.is_empty() && definition.alias.is_none() {
-            return Err(Error::new_spanned(
-                &spec.name,
-                format!("schema enum `{}` has no variants", definition.name),
-            ));
-        }
-        if let Some(alias) = &definition.alias {
-            validate_schema_type(schema, alias, &spec.name)?;
-        }
-        for variant in &definition.variants {
-            if let SchemaVariant::Data { fields, .. } = variant {
-                for field in fields {
-                    validate_schema_type(schema, &field.schema_type, &spec.name)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_schema_type(
-    schema: &SchemaSpec,
-    schema_type: &SchemaType,
-    span: &syn::Ident,
-) -> syn::Result<()> {
-    match schema_type {
-        SchemaType::Named(name) if is_primitive(name) => Ok(()),
-        SchemaType::Named(name) if schema.definitions.contains_key(name) => Ok(()),
-        SchemaType::Named(name) => Err(Error::new_spanned(
-            span,
-            format!("schema type `{name}` does not resolve to a declared enum or primitive"),
-        )),
-        SchemaType::Vec(inner) | SchemaType::Option(inner) => {
-            validate_schema_type(schema, inner, span)
-        }
-    }
-}
-
-fn is_primitive(name: &str) -> bool {
-    matches!(
-        name,
-        "String" | "u8" | "u16" | "u32" | "u64" | "bool" | "Date" | "Time" | "Bytes"
-    )
 }
 
 /// The observable block injects the standardized `Tap` / `Untap`

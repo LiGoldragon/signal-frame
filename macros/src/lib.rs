@@ -22,10 +22,6 @@
 //! kernel wrapper. Contract-local operation roots are the generated
 //! request-payload enum variants.
 //!
-//! `emit_schema!` is the new schema-driven Rust composer entrypoint.
-//! It reads assembled schema data through the `schema` crate and must
-//! not route through the legacy `ChannelSpec` parser/emitter.
-//!
 //! Channels can opt into observation by declaring an `observable`
 //! block; the macro then injects standardized `Tap`/`Untap`
 //! operations, an `ObserverStream`, an `ObserverSubscriptionOpened`
@@ -39,18 +35,11 @@
 mod emit;
 mod model;
 mod parse;
-mod schema_reader;
-mod schema_entry;
 mod validate;
 
 use proc_macro::TokenStream;
 
 use crate::model::ChannelSpec;
-
-#[proc_macro]
-pub fn emit_schema(input: TokenStream) -> TokenStream {
-    schema_entry::emit_schema(input)
-}
 
 #[proc_macro]
 pub fn legacy_signal_channel(input: TokenStream) -> TokenStream {
@@ -59,25 +48,7 @@ pub fn legacy_signal_channel(input: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn signal_channel(input: TokenStream) -> TokenStream {
-    if is_schema_marker(&input) {
-        return expand_schema_signal_channel();
-    }
     expand_legacy_signal_channel(input)
-}
-
-fn is_schema_marker(input: &TokenStream) -> bool {
-    input.to_string().replace(' ', "") == "[schema]"
-}
-
-fn expand_schema_signal_channel() -> TokenStream {
-    let spec = match schema_reader::read_default_schema() {
-        Ok(spec) => spec,
-        Err(error) => return error.into_compile_error().into(),
-    };
-    if let Err(error) = validate::validate(&spec) {
-        return error.into_compile_error().into();
-    }
-    emit::emit(&spec).into()
 }
 
 fn expand_legacy_signal_channel(input: TokenStream) -> TokenStream {

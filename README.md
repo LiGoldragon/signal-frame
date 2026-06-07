@@ -6,8 +6,7 @@ communication in the primary workspace.
 `signal-frame` owns the universal request/reply spine, protocol
 version records, length-prefixed rkyv frame helpers, exchange
 identifiers, async correlation primitives, stream / subscription
-lifecycle, reply plumbing, and the `emit_schema!` schema composer
-entrypoint. It also owns the shared `signal_cli!` thin-client skeleton
+lifecycle, and reply plumbing. It also owns the shared `signal_cli!` thin-client skeleton
 used by component CLIs: one NOTA argument in, one typed frame to the
 daemon, one NOTA reply out. Domain records and contract-local operation
 roots live in the per-component contract crates that depend on this
@@ -20,23 +19,15 @@ to the sibling crate `signal-sema`, where they describe the
 internal Sema-engine execution vocabulary rather than public
 wire-contract verbs.
 
-`emit_schema!` is the schema-driven Rust composer entrypoint:
+Schema-driven Rust generation lives in `schema-rust-next` build
+generation, not in a `signal-frame` proc macro. The frame kernel is a
+dependency of generated contracts; it is not the schema emitter.
+
+During migration, `signal_channel!` keeps the hand-written contract
+grammar alive for contracts that have not moved to schema:
 
 ```rust
-signal_frame::emit_schema!("spirit.schema");
-```
-
-The generated module includes the first schema-crystallized runtime
-surfaces: `ShortHeader` route projection, a prefix-preserving
-`ExtendedHeader`, an internal `Effect` vocabulary, an `EffectTable`
-mapping from external `Operation` to internal `Effect`, and
-`Interact` / `InteractionActor` fan-out scaffolding.
-
-During migration, `legacy_signal_channel!` keeps the old handwritten
-macro body grammar alive for contracts that have not moved to schema:
-
-```rust
-legacy_signal_channel! {
+signal_channel! {
     channel Message {
         operation Submit(Submission),
         operation Query(InboxQuery),
