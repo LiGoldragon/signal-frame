@@ -1,6 +1,6 @@
 //! Golden-ratio sections for the byte-0 root-verb namespace.
 //!
-//! A component triad's ordinary and owner contracts divide the 256
+//! A component triad's ordinary and meta contracts divide the 256
 //! possible byte-0 root-verb discriminators into two asymmetric sections:
 //! `Small` is `0x00..=0x63` and `Big` is `0x64..=0xFF`.
 //!
@@ -8,7 +8,7 @@
 //! section. Decimal 100 is intentionally human-memorable for audits and
 //! debugging. Power-of-two alternatives such as 64/192 or 128/128 are not
 //! used because the asymmetry is the point: ordinary contracts usually have
-//! more public operation verbs than owner contracts have policy verbs.
+//! more public operation verbs than meta contracts have policy verbs.
 
 /// Section of the byte-0 root-verb namespace claimed by a contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +44,7 @@ impl NamespaceSection {
     }
 }
 
-/// Assert at daemon compile time that paired ordinary and owner contracts claim
+/// Assert at daemon compile time that paired ordinary and meta contracts claim
 /// opposite byte-0 namespace sections.
 ///
 /// Each path must name a crate or module that exports
@@ -53,14 +53,14 @@ impl NamespaceSection {
 /// byte-0 spaces must coexist.
 #[macro_export]
 macro_rules! assert_triad_sections {
-    ($ordinary:path, $owner:path $(,)?) => {
+    ($ordinary:path, $meta:path $(,)?) => {
         const _: () = {
             use $ordinary as __signal_frame_ordinary_contract;
-            use $owner as __signal_frame_owner_contract;
+            use $meta as __signal_frame_meta_contract;
 
             match (
                 __signal_frame_ordinary_contract::CONTRACT_SECTION,
-                __signal_frame_owner_contract::CONTRACT_SECTION,
+                __signal_frame_meta_contract::CONTRACT_SECTION,
             ) {
                 ($crate::NamespaceSection::Small, $crate::NamespaceSection::Big)
                 | ($crate::NamespaceSection::Big, $crate::NamespaceSection::Small) => {}
@@ -68,16 +68,16 @@ macro_rules! assert_triad_sections {
                     panic!(concat!(
                         stringify!($ordinary),
                         " and ",
-                        stringify!($owner),
-                        " both claim NamespaceSection::Small; ordinary and owner contracts must claim opposite byte-0 namespace sections"
+                        stringify!($meta),
+                        " both claim NamespaceSection::Small; ordinary and meta contracts must claim opposite byte-0 namespace sections"
                     ));
                 }
                 ($crate::NamespaceSection::Big, $crate::NamespaceSection::Big) => {
                     panic!(concat!(
                         stringify!($ordinary),
                         " and ",
-                        stringify!($owner),
-                        " both claim NamespaceSection::Big; ordinary and owner contracts must claim opposite byte-0 namespace sections"
+                        stringify!($meta),
+                        " both claim NamespaceSection::Big; ordinary and meta contracts must claim opposite byte-0 namespace sections"
                     ));
                 }
             }

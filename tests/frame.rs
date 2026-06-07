@@ -1,4 +1,4 @@
-use nota_codec::{NotaDecode, NotaEncode};
+use nota_next::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     AcceptedOutcome, BatchErrorClassification, BatchFailureReason, CommitStatus, ExchangeFrame,
@@ -491,18 +491,27 @@ struct NotaSubmit {
 impl RequestPayload for NotaSubmit {}
 
 impl NotaEncode for NotaSubmit {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
-        encoder.start_record("Submit")?;
-        self.text.encode(encoder)?;
-        encoder.end_record()
+    fn to_nota(&self) -> String {
+        Delimiter::Parenthesis.wrap(["Submit".to_owned(), self.text.to_nota()])
     }
 }
 
 impl NotaDecode for NotaSubmit {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        decoder.expect_record_head("Submit")?;
-        let text = String::decode(decoder)?;
-        decoder.expect_record_end()?;
+    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+        let children =
+            NotaBlock::new(block).expect_children(Delimiter::Parenthesis, "Submit", 2)?;
+        let head = children[0]
+            .demote_to_string()
+            .ok_or(NotaDecodeError::ExpectedAtom {
+                type_name: "Submit",
+            })?;
+        if head != "Submit" {
+            return Err(NotaDecodeError::UnknownVariant {
+                enum_name: "NotaSubmit",
+                variant: head.to_owned(),
+            });
+        }
+        let text = String::from_nota_block(&children[1])?;
         Ok(Self { text })
     }
 }
@@ -515,18 +524,24 @@ struct NotaInbox {
 impl RequestPayload for NotaInbox {}
 
 impl NotaEncode for NotaInbox {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
-        encoder.start_record("Inbox")?;
-        self.name.encode(encoder)?;
-        encoder.end_record()
+    fn to_nota(&self) -> String {
+        Delimiter::Parenthesis.wrap(["Inbox".to_owned(), self.name.to_nota()])
     }
 }
 
 impl NotaDecode for NotaInbox {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        decoder.expect_record_head("Inbox")?;
-        let name = String::decode(decoder)?;
-        decoder.expect_record_end()?;
+    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+        let children = NotaBlock::new(block).expect_children(Delimiter::Parenthesis, "Inbox", 2)?;
+        let head = children[0]
+            .demote_to_string()
+            .ok_or(NotaDecodeError::ExpectedAtom { type_name: "Inbox" })?;
+        if head != "Inbox" {
+            return Err(NotaDecodeError::UnknownVariant {
+                enum_name: "NotaInbox",
+                variant: head.to_owned(),
+            });
+        }
+        let name = String::from_nota_block(&children[1])?;
         Ok(Self { name })
     }
 }
@@ -540,37 +555,43 @@ enum NotaChannelRequest {
 impl RequestPayload for NotaChannelRequest {}
 
 impl NotaEncode for NotaChannelRequest {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
+    fn to_nota(&self) -> String {
         match self {
-            Self::Submit(payload) => payload.encode(encoder),
-            Self::Inbox(payload) => payload.encode(encoder),
+            Self::Submit(payload) => payload.to_nota(),
+            Self::Inbox(payload) => payload.to_nota(),
         }
     }
 }
 
 impl NotaDecode for NotaChannelRequest {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        let head = decoder.peek_record_head()?;
-        match head.as_str() {
-            "Submit" => Ok(Self::Submit(NotaSubmit::decode(decoder)?)),
-            "Inbox" => Ok(Self::Inbox(NotaInbox::decode(decoder)?)),
-            other => Err(nota_codec::Error::UnknownVariant {
+    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+        let children = NotaBlock::new(block).expect_children(
+            Delimiter::Parenthesis,
+            "NotaChannelRequest",
+            2,
+        )?;
+        let head = children[0]
+            .demote_to_string()
+            .ok_or(NotaDecodeError::ExpectedAtom {
+                type_name: "NotaChannelRequest",
+            })?;
+        match head {
+            "Submit" => Ok(Self::Submit(NotaSubmit::from_nota_block(block)?)),
+            "Inbox" => Ok(Self::Inbox(NotaInbox::from_nota_block(block)?)),
+            other => Err(NotaDecodeError::UnknownVariant {
                 enum_name: "NotaChannelRequest",
-                got: other.to_string(),
+                variant: other.to_string(),
             }),
         }
     }
 }
 
 fn encode_to_text<T: NotaEncode>(value: &T) -> String {
-    let mut encoder = nota_codec::Encoder::new();
-    value.encode(&mut encoder).expect("encode");
-    encoder.into_string()
+    value.to_nota()
 }
 
-fn decode_request_from_text(text: &str) -> nota_codec::Result<Request<NotaChannelRequest>> {
-    let mut decoder = nota_codec::Decoder::new(text);
-    Request::<NotaChannelRequest>::decode(&mut decoder)
+fn decode_request_from_text(text: &str) -> Result<Request<NotaChannelRequest>, NotaDecodeError> {
+    NotaSource::new(text).parse::<Request<NotaChannelRequest>>()
 }
 
 #[test]
@@ -583,7 +604,7 @@ fn single_op_request_round_trips_without_outer_verb_wrapper() {
 
     // No `(Assert ...)` outer wrapper — the payload itself names the
     // contract-local verb via its record head.
-    assert_eq!(text, "(Submit hello)");
+    assert_eq!(text, "(Submit [hello])");
 
     let decoded = decode_request_from_text(&text).expect("decode");
     assert_eq!(decoded, request);
@@ -600,7 +621,7 @@ fn multi_op_request_round_trips_through_sequence() {
     ));
     let text = encode_to_text(&request);
 
-    assert_eq!(text, "[(Submit one) (Inbox operator)]");
+    assert_eq!(text, "[(Submit [one]) (Inbox [operator])]");
 
     let decoded = decode_request_from_text(&text).expect("decode");
     assert_eq!(decoded, request);

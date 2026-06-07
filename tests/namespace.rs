@@ -5,12 +5,12 @@ mod ordinary_contract {
         signal_frame::NamespaceSection::Big;
 }
 
-mod owner_contract {
+mod meta_contract {
     pub const CONTRACT_SECTION: signal_frame::NamespaceSection =
         signal_frame::NamespaceSection::Small;
 }
 
-signal_frame::assert_triad_sections!(ordinary_contract, owner_contract);
+signal_frame::assert_triad_sections!(ordinary_contract, meta_contract);
 
 #[test]
 fn section_cutoff_is_decimal_one_hundred() {

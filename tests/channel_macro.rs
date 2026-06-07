@@ -1,4 +1,4 @@
-use nota_codec::{NotaDecode, NotaEncode, NotaRecord};
+use nota_next::{NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
@@ -6,7 +6,9 @@ use signal_frame::{
     SubReply, signal_channel,
 };
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct Submission {
     body: String,
 }
@@ -17,24 +19,9 @@ impl Submission {
     }
 }
 
-impl NotaEncode for Submission {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
-        encoder.start_record("Submission")?;
-        self.body.encode(encoder)?;
-        encoder.end_record()
-    }
-}
-
-impl NotaDecode for Submission {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        decoder.expect_record_head("Submission")?;
-        let body = String::decode(decoder)?;
-        decoder.expect_record_end()?;
-        Ok(Self { body })
-    }
-}
-
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct InboxQuery {
     name: String,
 }
@@ -45,29 +32,16 @@ impl InboxQuery {
     }
 }
 
-impl NotaEncode for InboxQuery {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
-        encoder.start_record("InboxQuery")?;
-        self.name.encode(encoder)?;
-        encoder.end_record()
-    }
-}
-
-impl NotaDecode for InboxQuery {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        decoder.expect_record_head("InboxQuery")?;
-        let name = String::decode(decoder)?;
-        decoder.expect_record_end()?;
-        Ok(Self { name })
-    }
-}
-
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct Receipt {
     accepted: bool,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct Inbox {
     count: u64,
 }
@@ -87,11 +61,11 @@ mod message {
     }
 }
 
-mod owner_message {
+mod meta_message {
     use super::*;
 
     signal_channel! {
-        channel OwnerMessage {
+        channel MetaMessage {
             operation Configure(Submission),
             operation Drain(InboxQuery),
         }
@@ -106,7 +80,7 @@ use message::{
     Frame as MessageFrame, Operation as MessageOperation, OperationKind as MessageOperationKind,
     Reply as MessageReply,
 };
-use owner_message::Operation as OwnerMessageOperation;
+use meta_message::Operation as MetaMessageOperation;
 use std::future::Future;
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
@@ -114,7 +88,7 @@ use std::task::{Context, Poll, Wake, Waker};
 signal_frame::signal_cli! {
     pub struct MessageCommandLineDispatch {
         working message::Operation;
-        owner owner_message::Operation;
+        meta meta_message::Operation;
     }
 }
 
@@ -127,9 +101,7 @@ fn fresh_exchange() -> ExchangeIdentifier {
 }
 
 fn encode_to_text<T: NotaEncode>(value: &T) -> String {
-    let mut encoder = nota_codec::Encoder::new();
-    value.encode(&mut encoder).expect("encode");
-    encoder.into_string()
+    value.to_nota()
 }
 
 fn block_on_ready<Output>(future: impl Future<Output = Output>) -> Output {
@@ -181,7 +153,7 @@ fn macro_emits_contract_local_operation_enum_without_signal_verb() {
 
     let request = operation.into_request();
     assert_eq!(request.payloads().len(), 1);
-    assert_eq!(encode_to_text(&request), "(Submit (Submission hello))");
+    assert_eq!(encode_to_text(&request), "(Submit ([hello]))");
 }
 
 #[test]
@@ -192,13 +164,11 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
     ));
     let text = encode_to_text(&request);
 
-    assert_eq!(
-        text,
-        "[(Submit (Submission first)) (Query (InboxQuery operator))]"
-    );
+    assert_eq!(text, "[(Submit ([first])) (Query ([operator]))]");
 
-    let mut decoder = nota_codec::Decoder::new(&text);
-    let decoded = signal_frame::Request::<MessageOperation>::decode(&mut decoder).expect("decode");
+    let decoded = NotaSource::new(&text)
+        .parse::<signal_frame::Request<MessageOperation>>()
+        .expect("decode");
     assert_eq!(decoded, request);
 }
 
@@ -209,7 +179,7 @@ fn macro_emits_static_operation_heads_for_cli_dispatch() {
         &["Submit", "Query"]
     );
     assert_eq!(
-        <OwnerMessageOperation as signal_frame::SignalOperationHeads>::HEADS,
+        <MetaMessageOperation as signal_frame::SignalOperationHeads>::HEADS,
         &["Configure", "Drain"]
     );
 }
@@ -276,7 +246,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
 }
 
 #[test]
-fn signal_cli_macro_routes_heads_to_working_or_owner_socket() {
+fn signal_cli_macro_routes_heads_to_working_or_meta_socket() {
     let dispatch = MessageCommandLineDispatch::new();
 
     assert_eq!(
@@ -284,8 +254,8 @@ fn signal_cli_macro_routes_heads_to_working_or_owner_socket() {
         signal_frame::CommandLineSocket::Working
     );
     assert_eq!(
-        dispatch.route_head("Drain").expect("owner head routes"),
-        signal_frame::CommandLineSocket::Owner
+        dispatch.route_head("Drain").expect("meta head routes"),
+        signal_frame::CommandLineSocket::Meta
     );
     assert!(matches!(
         dispatch.route_head("Unknown"),
@@ -318,27 +288,37 @@ fn macro_frame_alias_round_trips_with_generated_payloads() {
     }
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct WatchWorker {
     name: String,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct WorkerToken {
     number: u64,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct WorkerOpened {
     number: u64,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct WorkerStopped {
     number: u64,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct WorkerStarted {
     number: u64,
 }
@@ -443,75 +423,39 @@ fn macro_generated_reply_works_with_positioned_subreply() {
 // operations, a stream, the publish surface, and a filter-match trait
 // the contract author implements against its own filter type.
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub enum LedgerObserverFilter {
     All,
     OnlyOperations,
     OnlyEffects,
 }
 
-impl NotaEncode for LedgerObserverFilter {
-    fn encode(&self, encoder: &mut nota_codec::Encoder) -> nota_codec::Result<()> {
-        match self {
-            LedgerObserverFilter::All => {
-                encoder.start_record("All")?;
-                encoder.end_record()
-            }
-            LedgerObserverFilter::OnlyOperations => {
-                encoder.start_record("OnlyOperations")?;
-                encoder.end_record()
-            }
-            LedgerObserverFilter::OnlyEffects => {
-                encoder.start_record("OnlyEffects")?;
-                encoder.end_record()
-            }
-        }
-    }
-}
-
-impl NotaDecode for LedgerObserverFilter {
-    fn decode(decoder: &mut nota_codec::Decoder<'_>) -> nota_codec::Result<Self> {
-        let head = decoder.peek_record_head()?;
-        match head.as_str() {
-            "All" => {
-                decoder.expect_record_head("All")?;
-                decoder.expect_record_end()?;
-                Ok(Self::All)
-            }
-            "OnlyOperations" => {
-                decoder.expect_record_head("OnlyOperations")?;
-                decoder.expect_record_end()?;
-                Ok(Self::OnlyOperations)
-            }
-            "OnlyEffects" => {
-                decoder.expect_record_head("OnlyEffects")?;
-                decoder.expect_record_end()?;
-                Ok(Self::OnlyEffects)
-            }
-            other => Err(nota_codec::Error::UnknownVariant {
-                enum_name: "LedgerObserverFilter",
-                got: other.to_string(),
-            }),
-        }
-    }
-}
-
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct LedgerNote {
     body: String,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct LedgerAcknowledgement {
     accepted: bool,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct OperationReceived {
     operation_kind: String,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct EffectEmitted {
     effect_label: String,
 }
@@ -534,7 +478,9 @@ mod ledger {
     }
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct Selection {
     name: String,
 }
@@ -652,11 +598,11 @@ fn observable_block_injects_reply_variant_with_freshly_minted_token() {
 fn observable_round_trips_tap_and_untap_through_nota() {
     let tap_request = LedgerOperation::Tap(LedgerObserverFilter::OnlyOperations).into_request();
     let tap_text = encode_to_text(&tap_request);
-    assert_eq!(tap_text, "(Tap (OnlyOperations))");
+    assert_eq!(tap_text, "(Tap OnlyOperations)");
 
-    let mut decoder = nota_codec::Decoder::new(&tap_text);
-    let decoded =
-        signal_frame::Request::<LedgerOperation>::decode(&mut decoder).expect("decode tap");
+    let decoded = NotaSource::new(&tap_text)
+        .parse::<signal_frame::Request<LedgerOperation>>()
+        .expect("decode tap");
     assert_eq!(decoded, tap_request);
 
     let token = LedgerObserverSubscriptionToken::new(signal_frame::SubscriptionTokenInner::new(9));
@@ -664,9 +610,9 @@ fn observable_round_trips_tap_and_untap_through_nota() {
     let untap_text = encode_to_text(&untap_request);
     assert_eq!(untap_text, "(Untap (ObserverSubscriptionToken 9))");
 
-    let mut decoder = nota_codec::Decoder::new(&untap_text);
-    let decoded_untap =
-        signal_frame::Request::<LedgerOperation>::decode(&mut decoder).expect("decode untap");
+    let decoded_untap = NotaSource::new(&untap_text)
+        .parse::<signal_frame::Request<LedgerOperation>>()
+        .expect("decode untap");
     assert_eq!(decoded_untap, untap_request);
 }
 
@@ -682,8 +628,9 @@ fn observable_round_trips_observer_subscription_opened_reply() {
         "(ObserverSubscriptionOpened (ObserverSubscriptionOpened (ObserverSubscriptionToken 3)))"
     );
 
-    let mut decoder = nota_codec::Decoder::new(&text);
-    let decoded = LedgerReply::decode(&mut decoder).expect("decode opened");
+    let decoded = NotaSource::new(&text)
+        .parse::<LedgerReply>()
+        .expect("decode opened");
     assert_eq!(decoded, reply_payload);
 }
 
@@ -696,9 +643,10 @@ fn observable_round_trips_operation_received_event() {
     let text = encode_to_text(&event);
     // Outer variant records the macro-injected `OperationReceived`
     // wire head; the inner record head comes from the contract
-    // author's NotaRecord-derived struct of the same name.
-    let mut decoder = nota_codec::Decoder::new(&text);
-    let decoded = LedgerEvent::decode(&mut decoder).expect("decode event");
+    // author's NotaEncode, NotaDecode-derived struct of the same name.
+    let decoded = NotaSource::new(&text)
+        .parse::<LedgerEvent>()
+        .expect("decode event");
     assert_eq!(decoded, event);
 }
 
@@ -750,22 +698,30 @@ fn observable_observer_set_routes_events_to_matching_observers() {
 // Contracts whose subscribers need richer predicates use
 // `filter <CustomType>;` and write the impl themselves.
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct AuditOperationReceived {
     label: String,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct AuditEffectEmitted {
     label: String,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct AuditProbe {
     target: String,
 }
 
-#[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+)]
 pub struct AuditProbed {
     accepted: bool,
 }
@@ -832,8 +788,8 @@ fn observable_filter_default_wire_round_trips_through_tap_request() {
         let tap = AuditOperation::Tap(filter).into_request();
         let text = encode_to_text(&tap);
 
-        let mut decoder = nota_codec::Decoder::new(&text);
-        let decoded = signal_frame::Request::<AuditOperation>::decode(&mut decoder)
+        let decoded = NotaSource::new(&text)
+            .parse::<signal_frame::Request<AuditOperation>>()
             .expect("default filter round-trips through Tap request");
         assert_eq!(decoded, tap);
     }

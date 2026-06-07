@@ -14,7 +14,6 @@ path = "src/lib.rs"
 proc-macro = true
 
 [dependencies]
-nota-codec  = { git = "https://github.com/LiGoldragon/nota-codec.git", branch = "main" }
 proc-macro2 = "1"
 quote       = "1"
 syn         = { version = "2", features = ["full", "extra-traits"] }

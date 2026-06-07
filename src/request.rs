@@ -12,9 +12,7 @@
 //! daemon executor or to payload constructors — not to a kernel
 //! validation function that lies about doing work.
 
-use nota_codec::{
-    Decoder, Encoder, Error as NotaError, NotaDecode, NotaEncode, Result as NotaResult, Token,
-};
+use nota_next::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
@@ -142,15 +140,11 @@ impl<Payload> NotaEncode for Request<Payload>
 where
     Payload: NotaEncode,
 {
-    fn encode(&self, encoder: &mut Encoder) -> NotaResult<()> {
+    fn to_nota(&self) -> String {
         if self.payloads.tail().is_empty() {
-            self.payloads.head().encode(encoder)
+            self.payloads.head().to_nota()
         } else {
-            encoder.start_seq()?;
-            for payload in self.payloads.iter() {
-                payload.encode(encoder)?;
-            }
-            encoder.end_seq()
+            Delimiter::SquareBracket.wrap(self.payloads.iter().map(Payload::to_nota))
         }
     }
 }
@@ -159,36 +153,32 @@ impl<Payload> NotaDecode for Request<Payload>
 where
     Payload: NotaDecode,
 {
-    fn decode(decoder: &mut Decoder<'_>) -> NotaResult<Self> {
-        match decoder.peek_token()? {
-            Some(Token::LBracket) => {
-                decoder.expect_seq_start()?;
-                let mut payloads = Vec::new();
-                while !decoder.peek_is_seq_end()? {
-                    payloads.push(Payload::decode(decoder)?);
-                }
-                decoder.expect_seq_end()?;
+    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+        match block.as_delimited(Delimiter::SquareBracket) {
+            Some(sequence) => {
+                let payloads = sequence
+                    .iter()
+                    .map(Payload::from_nota_block)
+                    .collect::<Result<Vec<_>, _>>()?;
                 match NonEmpty::try_from_vec(payloads) {
                     Ok(payloads) => Ok(Request {
                         caller: None,
                         payloads,
                     }),
-                    Err(NonEmptyError::Empty) => Err(NotaError::Validation {
+                    Err(NonEmptyError::Empty) => Err(NotaDecodeError::ExpectedRootCount {
                         type_name: "Request",
-                        message: "empty payload sequence".into(),
+                        expected: 1,
+                        found: 0,
                     }),
                 }
             }
-            Some(_) => {
-                let payload = Payload::decode(decoder)?;
+            None => {
+                let payload = Payload::from_nota_block(block)?;
                 Ok(Request {
                     caller: None,
                     payloads: NonEmpty::single(payload),
                 })
             }
-            None => Err(NotaError::UnexpectedEnd {
-                while_parsing: "Request",
-            }),
         }
     }
 }

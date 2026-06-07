@@ -8,7 +8,7 @@ use std::{
     process::ExitCode,
 };
 
-use nota_codec::{Decoder, Encoder, NotaDecode, NotaEncode, Token};
+use nota_next::{Block, Delimiter, Document, NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
@@ -38,7 +38,7 @@ pub trait SignalOperationHeads {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandLineSocket {
     Working,
-    Owner,
+    Meta,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -46,7 +46,7 @@ pub enum CommandLineRouteError {
     #[error("unknown request head: {head}")]
     UnknownRequestHead { head: String },
 
-    #[error("request head appears in both working and owner contracts: {head}")]
+    #[error("request head appears in both working and meta contracts: {head}")]
     AmbiguousRequestHead { head: String },
 }
 
@@ -107,12 +107,6 @@ impl CommandLineError {
 
     fn invalid_request(error: impl std::fmt::Display) -> Self {
         Self::InvalidRequest {
-            reason: error.to_string(),
-        }
-    }
-
-    fn invalid_reply(error: impl std::fmt::Display) -> Self {
-        Self::InvalidReply {
             reason: error.to_string(),
         }
     }
@@ -189,24 +183,24 @@ impl SingleArgument {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandLineRouteTable<'head> {
     working_heads: &'head [&'head str],
-    owner_heads: &'head [&'head str],
+    meta_heads: &'head [&'head str],
 }
 
 impl<'head> CommandLineRouteTable<'head> {
-    pub const fn new(working_heads: &'head [&'head str], owner_heads: &'head [&'head str]) -> Self {
+    pub const fn new(working_heads: &'head [&'head str], meta_heads: &'head [&'head str]) -> Self {
         Self {
             working_heads,
-            owner_heads,
+            meta_heads,
         }
     }
 
     pub fn route_head(&self, head: &str) -> Result<CommandLineSocket, CommandLineRouteError> {
         match (
             self.working_heads.contains(&head),
-            self.owner_heads.contains(&head),
+            self.meta_heads.contains(&head),
         ) {
             (true, false) => Ok(CommandLineSocket::Working),
-            (false, true) => Ok(CommandLineSocket::Owner),
+            (false, true) => Ok(CommandLineSocket::Meta),
             (true, true) => Err(CommandLineRouteError::AmbiguousRequestHead {
                 head: head.to_string(),
             }),
@@ -220,24 +214,24 @@ impl<'head> CommandLineRouteTable<'head> {
         self.working_heads
     }
 
-    pub const fn owner_heads(&self) -> &'head [&'head str] {
-        self.owner_heads
+    pub const fn meta_heads(&self) -> &'head [&'head str] {
+        self.meta_heads
     }
 }
 
-pub struct CommandLineDispatch<Working, Owner> {
+pub struct CommandLineDispatch<Working, Meta> {
     table: CommandLineRouteTable<'static>,
-    marker: PhantomData<fn() -> (Working, Owner)>,
+    marker: PhantomData<fn() -> (Working, Meta)>,
 }
 
-impl<Working, Owner> CommandLineDispatch<Working, Owner>
+impl<Working, Meta> CommandLineDispatch<Working, Meta>
 where
     Working: SignalOperationHeads,
-    Owner: SignalOperationHeads,
+    Meta: SignalOperationHeads,
 {
     pub const fn new() -> Self {
         Self {
-            table: CommandLineRouteTable::new(Working::HEADS, Owner::HEADS),
+            table: CommandLineRouteTable::new(Working::HEADS, Meta::HEADS),
             marker: PhantomData,
         }
     }
@@ -251,10 +245,10 @@ where
     }
 }
 
-impl<Working, Owner> Default for CommandLineDispatch<Working, Owner>
+impl<Working, Meta> Default for CommandLineDispatch<Working, Meta>
 where
     Working: SignalOperationHeads,
-    Owner: SignalOperationHeads,
+    Meta: SignalOperationHeads,
 {
     fn default() -> Self {
         Self::new()
@@ -264,35 +258,35 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandLineSockets {
     working_socket: Option<PathBuf>,
-    owner_socket: Option<PathBuf>,
+    meta_socket: Option<PathBuf>,
     working_variable: String,
-    owner_variable: String,
+    meta_variable: String,
 }
 
 impl CommandLineSockets {
     pub fn new(
         working_socket: Option<PathBuf>,
-        owner_socket: Option<PathBuf>,
+        meta_socket: Option<PathBuf>,
         working_variable: impl Into<String>,
-        owner_variable: impl Into<String>,
+        meta_variable: impl Into<String>,
     ) -> Self {
         Self {
             working_socket,
-            owner_socket,
+            meta_socket,
             working_variable: working_variable.into(),
-            owner_variable: owner_variable.into(),
+            meta_variable: meta_variable.into(),
         }
     }
 
     pub fn from_binary_name(binary_name: &str) -> Self {
         let stem = EnvironmentStem::from_binary_name(binary_name);
         let working_variable = format!("{stem}_SOCKET");
-        let owner_variable = format!("{stem}_OWNER_SOCKET");
+        let meta_variable = format!("{stem}_META_SOCKET");
         Self {
             working_socket: std::env::var(&working_variable).ok().map(PathBuf::from),
-            owner_socket: std::env::var(&owner_variable).ok().map(PathBuf::from),
+            meta_socket: std::env::var(&meta_variable).ok().map(PathBuf::from),
             working_variable,
-            owner_variable,
+            meta_variable,
         }
     }
 
@@ -301,7 +295,7 @@ impl CommandLineSockets {
             Some(socket.into()),
             None,
             "SIGNAL_WORKING_SOCKET",
-            "SIGNAL_OWNER_SOCKET",
+            "SIGNAL_META_SOCKET",
         )
     }
 
@@ -313,11 +307,11 @@ impl CommandLineSockets {
             })
     }
 
-    pub fn owner_socket(&self) -> Result<&Path, CommandLineError> {
-        self.owner_socket
+    pub fn meta_socket(&self) -> Result<&Path, CommandLineError> {
+        self.meta_socket
             .as_deref()
             .ok_or_else(|| CommandLineError::MissingSocket {
-                variable: self.owner_variable.clone(),
+                variable: self.meta_variable.clone(),
             })
     }
 
@@ -325,8 +319,8 @@ impl CommandLineSockets {
         &self.working_variable
     }
 
-    pub fn owner_variable(&self) -> &str {
-        &self.owner_variable
+    pub fn meta_variable(&self) -> &str {
+        &self.meta_variable
     }
 }
 
@@ -387,35 +381,59 @@ pub struct RequestHead {
 
 impl RequestHead {
     pub fn from_text(text: &str) -> Result<Self, CommandLineError> {
-        let mut decoder = Decoder::new(text);
-        if matches!(
-            decoder
-                .peek_token()
-                .map_err(CommandLineError::invalid_request)?,
-            Some(Token::LBracket)
-        ) {
-            decoder
-                .expect_seq_start()
-                .map_err(CommandLineError::invalid_request)?;
-        }
-        let head = decoder
-            .peek_record_head()
-            .map_err(CommandLineError::invalid_request)?;
-        Ok(Self { head })
+        let document = Document::parse(text).map_err(CommandLineError::invalid_request)?;
+        let block = document
+            .root_object_at(0)
+            .ok_or_else(|| CommandLineError::InvalidRequest {
+                reason: "expected request object".to_owned(),
+            })?;
+        let head = RequestHeadBlock::new(block).head()?;
+        Ok(Self {
+            head: head.to_owned(),
+        })
     }
 
     pub fn as_str(&self) -> &str {
         &self.head
     }
 
-    pub fn route<Working, Owner>(&self) -> Result<CommandLineSocket, CommandLineError>
+    pub fn route<Working, Meta>(&self) -> Result<CommandLineSocket, CommandLineError>
     where
         Working: SignalOperationHeads,
-        Owner: SignalOperationHeads,
+        Meta: SignalOperationHeads,
     {
-        CommandLineDispatch::<Working, Owner>::new()
+        CommandLineDispatch::<Working, Meta>::new()
             .route_head(self.as_str())
             .map_err(CommandLineError::route)
+    }
+}
+
+struct RequestHeadBlock<'block> {
+    block: &'block Block,
+}
+
+impl<'block> RequestHeadBlock<'block> {
+    fn new(block: &'block Block) -> Self {
+        Self { block }
+    }
+
+    fn head(&self) -> Result<&'block str, CommandLineError> {
+        match self.block.as_delimited(Delimiter::SquareBracket) {
+            Some(sequence) => sequence
+                .first()
+                .ok_or_else(|| CommandLineError::InvalidRequest {
+                    reason: "expected at least one request in bracketed sequence".to_owned(),
+                })
+                .and_then(|block| Self::new(block).head()),
+            None => self
+                .block
+                .root_object_at(0)
+                .and_then(Block::demote_to_string)
+                .or_else(|| self.block.demote_to_string())
+                .ok_or_else(|| CommandLineError::InvalidRequest {
+                    reason: "expected request record head".to_owned(),
+                }),
+        }
     }
 }
 
@@ -439,35 +457,9 @@ where
     Operation: NotaDecode,
 {
     pub fn decode_request(&self) -> Result<Request<Operation>, CommandLineError> {
-        let mut decoder = Decoder::new(&self.text);
-        let request = Request::<Operation>::decode(&mut decoder)
-            .map_err(CommandLineError::invalid_request)?;
-        RequestEnd::new(&mut decoder).expect()?;
-        Ok(request)
-    }
-}
-
-struct RequestEnd<'decoder, 'input> {
-    decoder: &'decoder mut Decoder<'input>,
-}
-
-impl<'decoder, 'input> RequestEnd<'decoder, 'input> {
-    fn new(decoder: &'decoder mut Decoder<'input>) -> Self {
-        Self { decoder }
-    }
-
-    fn expect(&mut self) -> Result<(), CommandLineError> {
-        if let Some(token) = self
-            .decoder
-            .peek_token()
-            .map_err(CommandLineError::invalid_request)?
-        {
-            Err(CommandLineError::InvalidRequest {
-                reason: format!("expected end of input, got {token:?}"),
-            })
-        } else {
-            Ok(())
-        }
+        NotaSource::new(&self.text)
+            .parse::<Request<Operation>>()
+            .map_err(CommandLineError::invalid_request)
     }
 }
 
@@ -571,13 +563,13 @@ where
     }
 }
 
-pub struct ClientShape<Working, Owner> {
+pub struct ClientShape<Working, Meta> {
     sockets: CommandLineSockets,
     maximum_frame_bytes: usize,
-    marker: PhantomData<fn() -> (Working, Owner)>,
+    marker: PhantomData<fn() -> (Working, Meta)>,
 }
 
-impl<Working, Owner> ClientShape<Working, Owner> {
+impl<Working, Meta> ClientShape<Working, Meta> {
     pub const DEFAULT_MAXIMUM_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
     pub fn new(sockets: CommandLineSockets) -> Self {
@@ -598,14 +590,14 @@ impl<Working, Owner> ClientShape<Working, Owner> {
     }
 }
 
-impl<Working, Owner> ClientShape<Working, Owner>
+impl<Working, Meta> ClientShape<Working, Meta>
 where
     Working: ClientFrame,
-    Owner: ClientFrame,
+    Meta: ClientFrame,
     Working::Operation: SignalOperationHeads + RequestPayload + NotaDecode,
-    Owner::Operation: SignalOperationHeads + RequestPayload + NotaDecode,
+    Meta::Operation: SignalOperationHeads + RequestPayload + NotaDecode,
     Working::Reply: NotaEncode + Debug,
-    Owner::Reply: NotaEncode + Debug,
+    Meta::Reply: NotaEncode + Debug,
 {
     pub fn run_from_environment(binary_name: &str) -> ExitCode {
         match Self::from_binary_name(binary_name).run_environment() {
@@ -630,7 +622,7 @@ where
     pub fn reply_text(&self, argument: SingleArgument) -> Result<String, CommandLineError> {
         let input = RequestInput::new(argument);
         let text = input.text()?;
-        match RequestHead::from_text(&text)?.route::<Working::Operation, Owner::Operation>()? {
+        match RequestHead::from_text(&text)?.route::<Working::Operation, Meta::Operation>()? {
             CommandLineSocket::Working => {
                 let request = RequestText::<Working::Operation>::new(text)
                     .decode_request()?
@@ -638,11 +630,11 @@ where
                 let reply = self.submit::<Working>(self.sockets.working_socket()?, request)?;
                 Self::encode_reply(&reply)
             }
-            CommandLineSocket::Owner => {
-                let request = RequestText::<Owner::Operation>::new(text)
+            CommandLineSocket::Meta => {
+                let request = RequestText::<Meta::Operation>::new(text)
                     .decode_request()?
                     .with_caller(Caller::from_kernel());
-                let reply = self.submit::<Owner>(self.sockets.owner_socket()?, request)?;
+                let reply = self.submit::<Meta>(self.sockets.meta_socket()?, request)?;
                 Self::encode_reply(&reply)
             }
         }
@@ -740,24 +732,11 @@ where
     where
         ReplyPayload: NotaEncode,
     {
-        let mut encoder = Encoder::new();
         if replies.tail().is_empty() {
-            replies
-                .head()
-                .encode(&mut encoder)
-                .map_err(CommandLineError::invalid_reply)?;
+            Ok(replies.head().to_nota())
         } else {
-            encoder
-                .start_seq()
-                .map_err(CommandLineError::invalid_reply)?;
-            for reply in replies {
-                reply
-                    .encode(&mut encoder)
-                    .map_err(CommandLineError::invalid_reply)?;
-            }
-            encoder.end_seq().map_err(CommandLineError::invalid_reply)?;
+            Ok(Delimiter::SquareBracket.wrap(replies.iter().map(ReplyPayload::to_nota)))
         }
-        Ok(encoder.into_string())
     }
 
     fn exchange() -> ExchangeIdentifier {
@@ -776,7 +755,7 @@ macro_rules! signal_cli {
             fn main() -> ::std::process::ExitCode {
                 ::signal_frame::ClientShape::<
                     $working_crate::Frame,
-                    [<owner_ $working_crate>]::Frame,
+                    [<meta_ $working_crate>]::Frame,
                 >::run_from_environment(::std::stringify!($name))
             }
         }
@@ -784,27 +763,27 @@ macro_rules! signal_cli {
     (
         $name:ident,
         working: $working_frame:path,
-        owner: $owner_frame:path $(,)?
+        meta: $meta_frame:path $(,)?
     ) => {
         fn main() -> ::std::process::ExitCode {
-            ::signal_frame::ClientShape::<$working_frame, $owner_frame>
+            ::signal_frame::ClientShape::<$working_frame, $meta_frame>
                 ::run_from_environment(::std::stringify!($name))
         }
     };
     (
         $visibility:vis struct $name:ident {
             working $working:path;
-            owner $owner:path;
+            meta $meta:path;
         }
     ) => {
         $visibility struct $name {
-            dispatch: ::signal_frame::CommandLineDispatch<$working, $owner>,
+            dispatch: ::signal_frame::CommandLineDispatch<$working, $meta>,
         }
 
         impl $name {
             pub const fn new() -> Self {
                 Self {
-                    dispatch: ::signal_frame::CommandLineDispatch::<$working, $owner>::new(),
+                    dispatch: ::signal_frame::CommandLineDispatch::<$working, $meta>::new(),
                 }
             }
 

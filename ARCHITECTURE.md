@@ -128,7 +128,7 @@ executor lowering, logging, introspection).
   single-argument rule, parses the argument as NOTA text or a file path,
   dispatches request heads to ordinary vs meta sockets, injects
   `Caller::from_kernel()`, sends length-prefixed frames, and renders the
-  typed reply payload back to NOTA. Component crates still own their
+  typed reply payload back to NOTA through `nota-next`. Component crates still own their
   domain records, socket deployment paths, daemon behavior, and
   authorization policy.
 
@@ -178,9 +178,10 @@ executor lowering, logging, introspection).
   `pub use signal_frame_macros::signal_channel`.
 - `Slot<T>` and `Revision` are wire identity records only. The Sema
   engine owns allocation, lookup, compare-and-set, and persistence.
-- Text rendering/parsing of NOTA records belongs to NOTA / Nexus
-  projection layers — `signal-frame` only carries the codec impls
-  needed to round-trip its own records.
+- Text rendering/parsing of NOTA records belongs to the NOTA /
+  Nexus projection layers. `signal-frame` uses `nota-next` only for
+  its own frame-kernel record projections and generated compatibility
+  macro output; it does not carry a second text codec.
 
 ## 4 · Invariants
 
@@ -221,13 +222,13 @@ data variants pre-allocated across namespaces), 273 (extended
 
 ### 5.1 · Three tiers — what they are and why
 
-Every Signal type — `Operation`, `Reply`, `Effect`, and
-`SemaObservation` from sibling `signal-sema` — exists at three
-projections of progressively richer fidelity:
+Every contract-local Signal type — `Operation`, `Reply`, optional
+`Event`, and any explicit contract-owned effect/outcome record — exists
+at three projections of progressively richer fidelity:
 
 ```mermaid
 flowchart LR
-    signal_type["A Signal type<br/>(Operation, Reply, Effect, SemaObservation)"]
+    signal_type["A Signal type<br/>(Operation, Reply, Event, EffectOutcome)"]
 
     subgraph tier_one [Tier 1 — short header 8 bytes]
         tier_one_node["LogVariant projection<br/>autogen via signal_channel macro<br/>byte 0 root verb + bytes 1-7 sub-variants"]

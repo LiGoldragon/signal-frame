@@ -1,7 +1,7 @@
-error[E0080]: evaluation panicked: ordinary_contract and owner_contract both claim NamespaceSection::Big; ordinary and owner contracts must claim opposite byte-0 namespace sections
+error[E0080]: evaluation panicked: ordinary_contract and meta_contract both claim NamespaceSection::Big; ordinary and meta contracts must claim opposite byte-0 namespace sections
  --> tests/ui/namespace_sections/same_section.rs:9:1
   |
-9 | signal_frame::assert_triad_sections!(ordinary_contract, owner_contract);
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
+9 | signal_frame::assert_triad_sections!(ordinary_contract, meta_contract);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed here
   |
   = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `signal_frame::assert_triad_sections` (in Nightly builds, run with -Z macro-backtrace for more info)

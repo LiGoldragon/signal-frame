@@ -491,7 +491,8 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_codec::NotaEnum,
+            ::nota_next::NotaEncode,
+            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -538,7 +539,8 @@ fn emit_reply_kind(block: &ReplyBlockSpec) -> TokenStream {
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_codec::NotaEnum,
+            ::nota_next::NotaEncode,
+            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -576,7 +578,8 @@ fn emit_event_kind(block: &EventBlockSpec) -> TokenStream {
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_codec::NotaEnum,
+            ::nota_next::NotaEncode,
+            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -648,7 +651,8 @@ fn emit_stream_kind_and_witnesses(spec: &ChannelSpec) -> TokenStream {
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_codec::NotaEnum,
+            ::nota_next::NotaEncode,
+            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -791,11 +795,13 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
     let encode_arms = kinds.iter().map(|k| {
         let variant = &k.variant;
         let variant_string = variant.to_string();
+        let payload = &k.payload;
         quote! {
             Self::#variant(payload) => {
-                encoder.start_record(#variant_string)?;
-                payload.encode(encoder)?;
-                encoder.end_record()
+                ::nota_next::Delimiter::Parenthesis.wrap([
+                    #variant_string.to_owned(),
+                    <#payload as ::nota_next::NotaEncode>::to_nota(payload),
+                ])
             }
         }
     });
@@ -805,35 +811,41 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
         let payload = &k.payload;
         quote! {
             #variant_string => {
-                decoder.expect_record_head(#variant_string)?;
-                let payload = <#payload as ::nota_codec::NotaDecode>::decode(decoder)?;
-                decoder.expect_record_end()?;
+                let payload = <#payload as ::nota_next::NotaDecode>::from_nota_block(
+                    &children[1],
+                )?;
                 Ok(Self::#variant(payload))
             }
         }
     });
     quote! {
-        impl ::nota_codec::NotaEncode for #name {
-            fn encode(
-                &self,
-                encoder: &mut ::nota_codec::Encoder,
-            ) -> ::nota_codec::Result<()> {
+        impl ::nota_next::NotaEncode for #name {
+            fn to_nota(&self) -> String {
                 match self {
                     #( #encode_arms, )*
                 }
             }
         }
 
-        impl ::nota_codec::NotaDecode for #name {
-            fn decode(
-                decoder: &mut ::nota_codec::Decoder<'_>,
-            ) -> ::nota_codec::Result<Self> {
-                let head = decoder.peek_record_head()?;
-                match head.as_str() {
+        impl ::nota_next::NotaDecode for #name {
+            fn from_nota_block(
+                block: &::nota_next::Block,
+            ) -> Result<Self, ::nota_next::NotaDecodeError> {
+                let children = ::nota_next::NotaBlock::new(block).expect_children(
+                    ::nota_next::Delimiter::Parenthesis,
+                    #enum_name_string,
+                    2,
+                )?;
+                let head = children[0]
+                    .demote_to_string()
+                    .ok_or(::nota_next::NotaDecodeError::ExpectedAtom {
+                        type_name: #enum_name_string,
+                    })?;
+                match head {
                     #( #decode_arms, )*
-                    other => Err(::nota_codec::Error::UnknownVariant {
+                    other => Err(::nota_next::NotaDecodeError::UnknownVariant {
                         enum_name: #enum_name_string,
-                        got: other.to_string(),
+                        variant: other.to_string(),
                     }),
                 }
             }
@@ -912,24 +924,36 @@ fn emit_observable_runtime(
             }
         }
 
-        impl ::nota_codec::NotaEncode for #token_type_name {
-            fn encode(
-                &self,
-                encoder: &mut ::nota_codec::Encoder,
-            ) -> ::nota_codec::Result<()> {
-                encoder.start_record("ObserverSubscriptionToken")?;
-                self.0.value().encode(encoder)?;
-                encoder.end_record()
+        impl ::nota_next::NotaEncode for #token_type_name {
+            fn to_nota(&self) -> String {
+                ::nota_next::Delimiter::Parenthesis.wrap([
+                    "ObserverSubscriptionToken".to_owned(),
+                    self.0.value().to_nota(),
+                ])
             }
         }
 
-        impl ::nota_codec::NotaDecode for #token_type_name {
-            fn decode(
-                decoder: &mut ::nota_codec::Decoder<'_>,
-            ) -> ::nota_codec::Result<Self> {
-                decoder.expect_record_head("ObserverSubscriptionToken")?;
-                let value = u64::decode(decoder)?;
-                decoder.expect_record_end()?;
+        impl ::nota_next::NotaDecode for #token_type_name {
+            fn from_nota_block(
+                block: &::nota_next::Block,
+            ) -> Result<Self, ::nota_next::NotaDecodeError> {
+                let children = ::nota_next::NotaBlock::new(block).expect_children(
+                    ::nota_next::Delimiter::Parenthesis,
+                    "ObserverSubscriptionToken",
+                    2,
+                )?;
+                let head = children[0]
+                    .demote_to_string()
+                    .ok_or(::nota_next::NotaDecodeError::ExpectedAtom {
+                        type_name: "ObserverSubscriptionToken",
+                    })?;
+                if head != "ObserverSubscriptionToken" {
+                    return Err(::nota_next::NotaDecodeError::UnknownVariant {
+                        enum_name: "ObserverSubscriptionToken",
+                        variant: head.to_owned(),
+                    });
+                }
+                let value = u64::from_nota_block(&children[1])?;
                 Ok(Self(::signal_frame::SubscriptionTokenInner::new(value)))
             }
         }
@@ -957,24 +981,36 @@ fn emit_observable_runtime(
             }
         }
 
-        impl ::nota_codec::NotaEncode for #opened_type_name {
-            fn encode(
-                &self,
-                encoder: &mut ::nota_codec::Encoder,
-            ) -> ::nota_codec::Result<()> {
-                encoder.start_record("ObserverSubscriptionOpened")?;
-                self.token.encode(encoder)?;
-                encoder.end_record()
+        impl ::nota_next::NotaEncode for #opened_type_name {
+            fn to_nota(&self) -> String {
+                ::nota_next::Delimiter::Parenthesis.wrap([
+                    "ObserverSubscriptionOpened".to_owned(),
+                    self.token.to_nota(),
+                ])
             }
         }
 
-        impl ::nota_codec::NotaDecode for #opened_type_name {
-            fn decode(
-                decoder: &mut ::nota_codec::Decoder<'_>,
-            ) -> ::nota_codec::Result<Self> {
-                decoder.expect_record_head("ObserverSubscriptionOpened")?;
-                let token = #token_type_name::decode(decoder)?;
-                decoder.expect_record_end()?;
+        impl ::nota_next::NotaDecode for #opened_type_name {
+            fn from_nota_block(
+                block: &::nota_next::Block,
+            ) -> Result<Self, ::nota_next::NotaDecodeError> {
+                let children = ::nota_next::NotaBlock::new(block).expect_children(
+                    ::nota_next::Delimiter::Parenthesis,
+                    "ObserverSubscriptionOpened",
+                    2,
+                )?;
+                let head = children[0]
+                    .demote_to_string()
+                    .ok_or(::nota_next::NotaDecodeError::ExpectedAtom {
+                        type_name: "ObserverSubscriptionOpened",
+                    })?;
+                if head != "ObserverSubscriptionOpened" {
+                    return Err(::nota_next::NotaDecodeError::UnknownVariant {
+                        enum_name: "ObserverSubscriptionOpened",
+                        variant: head.to_owned(),
+                    });
+                }
+                let token = #token_type_name::from_nota_block(&children[1])?;
                 Ok(Self { token })
             }
         }
@@ -1189,52 +1225,32 @@ fn emit_default_filter(
             EffectsOnly,
         }
 
-        impl ::nota_codec::NotaEncode for #filter_type {
-            fn encode(
-                &self,
-                encoder: &mut ::nota_codec::Encoder,
-            ) -> ::nota_codec::Result<()> {
+        impl ::nota_next::NotaEncode for #filter_type {
+            fn to_nota(&self) -> String {
                 match self {
-                    Self::All => {
-                        encoder.start_record("All")?;
-                        encoder.end_record()
-                    }
-                    Self::OperationsOnly => {
-                        encoder.start_record("OperationsOnly")?;
-                        encoder.end_record()
-                    }
-                    Self::EffectsOnly => {
-                        encoder.start_record("EffectsOnly")?;
-                        encoder.end_record()
-                    }
+                    Self::All => "All".to_owned(),
+                    Self::OperationsOnly => "OperationsOnly".to_owned(),
+                    Self::EffectsOnly => "EffectsOnly".to_owned(),
                 }
             }
         }
 
-        impl ::nota_codec::NotaDecode for #filter_type {
-            fn decode(
-                decoder: &mut ::nota_codec::Decoder<'_>,
-            ) -> ::nota_codec::Result<Self> {
-                let head = decoder.peek_record_head()?;
-                match head.as_str() {
-                    "All" => {
-                        decoder.expect_record_head("All")?;
-                        decoder.expect_record_end()?;
-                        Ok(Self::All)
-                    }
-                    "OperationsOnly" => {
-                        decoder.expect_record_head("OperationsOnly")?;
-                        decoder.expect_record_end()?;
-                        Ok(Self::OperationsOnly)
-                    }
-                    "EffectsOnly" => {
-                        decoder.expect_record_head("EffectsOnly")?;
-                        decoder.expect_record_end()?;
-                        Ok(Self::EffectsOnly)
-                    }
-                    other => Err(::nota_codec::Error::UnknownVariant {
+        impl ::nota_next::NotaDecode for #filter_type {
+            fn from_nota_block(
+                block: &::nota_next::Block,
+            ) -> Result<Self, ::nota_next::NotaDecodeError> {
+                let head = block
+                    .demote_to_string()
+                    .ok_or(::nota_next::NotaDecodeError::ExpectedAtom {
+                        type_name: stringify!(#filter_type),
+                    })?;
+                match head {
+                    "All" => Ok(Self::All),
+                    "OperationsOnly" => Ok(Self::OperationsOnly),
+                    "EffectsOnly" => Ok(Self::EffectsOnly),
+                    other => Err(::nota_next::NotaDecodeError::UnknownVariant {
                         enum_name: stringify!(#filter_type),
-                        got: other.to_string(),
+                        variant: other.to_string(),
                     }),
                 }
             }

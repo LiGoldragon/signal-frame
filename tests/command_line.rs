@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use nota_codec::{NotaEncode, NotaRecord};
+use nota_next::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ClientShape, CommandLineSocket, CommandLineSockets, ExchangeFrameBody, NonEmpty,
@@ -17,7 +17,9 @@ use signal_frame::{
 mod working {
     use super::*;
 
-    #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+    #[derive(
+        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    )]
     pub struct Submission {
         body: String,
     }
@@ -28,12 +30,16 @@ mod working {
         }
     }
 
-    #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+    #[derive(
+        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    )]
     pub struct Query {
         selection: String,
     }
 
-    #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+    #[derive(
+        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    )]
     pub struct Accepted {
         ok: bool,
     }
@@ -55,17 +61,21 @@ mod working {
     }
 }
 
-mod owner {
+mod meta {
     use super::*;
 
-    #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+    #[derive(
+        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    )]
     pub struct Drain {}
 
-    #[derive(Archive, RkyvSerialize, RkyvDeserialize, NotaRecord, Debug, Clone, PartialEq, Eq)]
+    #[derive(
+        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    )]
     pub struct Drained {}
 
     signal_frame::signal_channel! {
-        channel Owner {
+        channel Meta {
             operation Drain(Drain),
         }
         reply Reply {
@@ -75,9 +85,7 @@ mod owner {
 }
 
 fn encode_to_text<T: NotaEncode>(value: &T) -> String {
-    let mut encoder = nota_codec::Encoder::new();
-    value.encode(&mut encoder).expect("encode");
-    encoder.into_string()
+    value.to_nota()
 }
 
 fn socket_path(name: &str) -> PathBuf {
@@ -131,7 +139,7 @@ fn request_head_routes_first_payload_in_sequence() {
         RequestHead::from_text("[(Submit (hello)) (Query (everything))]").expect("head parsed");
 
     assert_eq!(
-        head.route::<working::Operation, owner::Operation>()
+        head.route::<working::Operation, meta::Operation>()
             .expect("route"),
         CommandLineSocket::Working
     );
@@ -146,12 +154,12 @@ fn command_line_sockets_derive_persona_environment_names_from_binary_name() {
     let sockets = CommandLineSockets::from_binary_name("spirit");
 
     assert_eq!(sockets.working_variable(), "PERSONA_SPIRIT_SOCKET");
-    assert_eq!(sockets.owner_variable(), "PERSONA_SPIRIT_OWNER_SOCKET");
+    assert_eq!(sockets.meta_variable(), "PERSONA_SPIRIT_META_SOCKET");
 
     let sockets = CommandLineSockets::from_binary_name("persona_orchestrate");
 
     assert_eq!(sockets.working_variable(), "PERSONA_ORCHESTRATE_SOCKET");
-    assert_eq!(sockets.owner_variable(), "PERSONA_ORCHESTRATE_OWNER_SOCKET");
+    assert_eq!(sockets.meta_variable(), "PERSONA_ORCHESTRATE_META_SOCKET");
 }
 
 #[test]
@@ -181,11 +189,11 @@ fn client_shape_sends_request_with_caller_and_prints_reply() {
     });
 
     let argument =
-        SingleArgument::from_arguments(["spirit".to_string(), "(Submit (hello))".to_string()])
+        SingleArgument::from_arguments(["spirit".to_string(), "(Submit ([hello]))".to_string()])
             .expect("argument");
-    let client = ClientShape::<working::Frame, owner::Frame>::new(
-        CommandLineSockets::working_only(socket.clone()),
-    );
+    let client = ClientShape::<working::Frame, meta::Frame>::new(CommandLineSockets::working_only(
+        socket.clone(),
+    ));
     let reply = client.reply_text(argument).expect("reply text");
 
     assert_eq!(
@@ -224,12 +232,12 @@ fn client_shape_prints_multi_operation_replies_as_sequence() {
 
     let argument = SingleArgument::from_arguments([
         "spirit".to_string(),
-        "[(Submit (hello)) (Submit (again))]".to_string(),
+        "[(Submit ([hello])) (Submit ([again]))]".to_string(),
     ])
     .expect("argument");
-    let client = ClientShape::<working::Frame, owner::Frame>::new(
-        CommandLineSockets::working_only(socket.clone()),
-    );
+    let client = ClientShape::<working::Frame, meta::Frame>::new(CommandLineSockets::working_only(
+        socket.clone(),
+    ));
     let reply = client.reply_text(argument).expect("reply text");
 
     assert_eq!(
