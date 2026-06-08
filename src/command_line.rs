@@ -14,8 +14,8 @@ use thiserror::Error;
 
 use crate::{
     Caller, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence,
-    LogVariant, NonEmpty, Reply, Request, RequestPayload, SessionEpoch, StreamingFrame,
-    StreamingFrameBody, SubReply,
+    LogVariant, NonEmpty, Reply, Request, RequestPayload, SessionEpoch, SignalOperationHeads,
+    StreamingFrame, StreamingFrameBody, SubReply,
 };
 
 type HighSerializer<'archive> = rkyv::api::high::HighSerializer<
@@ -23,17 +23,6 @@ type HighSerializer<'archive> = rkyv::api::high::HighSerializer<
     rkyv::ser::allocator::ArenaHandle<'archive>,
     rkyv::rancor::Error,
 >;
-
-/// Request-payload enums expose their NOTA record heads through this
-/// trait. `signal_channel!` implements it for the generated operation
-/// enum so command-line dispatch can route before full decode.
-pub trait SignalOperationHeads {
-    const HEADS: &'static [&'static str];
-
-    fn contains_head(head: &str) -> bool {
-        Self::HEADS.contains(&head)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandLineSocket {

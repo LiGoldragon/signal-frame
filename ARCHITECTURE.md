@@ -73,12 +73,14 @@ executor lowering, logging, introspection).
   ordered payload unit inside `Request`.
 - `Request<Payload>` carrying `NonEmpty<Payload>` as the ordered
   exchange unit plus optional advisory `Caller` process context, with
-  NOTA codec (single payload + bracketed sequence). Each payload is
-  itself a contract operation; the payload's NOTA record head names the
-  contract-local verb. No per-operation wrapper appears — the previous
-  `Operation<Payload>` transparent wrapper has been collapsed out. The
-  NOTA projection intentionally carries only payloads; `Caller` is
-  injected by thin CLIs at the frame boundary.
+  feature-gated NOTA codec (single payload + bracketed sequence). Each
+  payload is itself a contract operation; the payload's NOTA record head
+  names the contract-local verb. No per-operation wrapper appears — the
+  previous `Operation<Payload>` transparent wrapper has been collapsed
+  out. The NOTA projection intentionally carries only payloads; `Caller`
+  is injected by thin CLIs at the frame boundary. The codec exists only
+  under `nota-text`, so daemon default dependency trees keep the binary
+  frame kernel without a NOTA parser.
 - `Caller`, `ProcessIdentifier`, `ExecutablePath`, and
   `ProcessStartTime` — best-effort parent-process context captured by
   a component CLI with `getppid()` plus Linux `/proc` facts. This is an
@@ -122,7 +124,8 @@ executor lowering, logging, introspection).
   The macro also emits the structurally obvious `From<Payload> for
   Reply` impls so contract crates do not hand-write conversion
   stacks.
-- `SingleArgument`, `SignalOperationHeads`, `CommandLineRouteTable`,
+- Under the `nota-text` feature: `SingleArgument`,
+  `SignalOperationHeads`, `CommandLineRouteTable`,
   `CommandLineSockets`, `CommandLineDispatch`, `ClientShape`, and
   `signal_cli!` — the shared thin-CLI frame client. It enforces the
   single-argument rule, parses the argument as NOTA text or a file path,
@@ -179,9 +182,9 @@ executor lowering, logging, introspection).
 - `Slot<T>` and `Revision` are wire identity records only. The Sema
   engine owns allocation, lookup, compare-and-set, and persistence.
 - Text rendering/parsing of NOTA records belongs to the NOTA /
-  Nexus projection layers. `signal-frame` uses `nota-next` only for
-  its own frame-kernel record projections and generated compatibility
-  macro output; it does not carry a second text codec.
+  Nexus projection layers. `signal-frame` exposes `nota-next` only
+  through `nota-text` for its own thin-CLI and frame-kernel text
+  projections; the default binary kernel does not carry a text codec.
 
 ## 4 · Invariants
 

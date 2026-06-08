@@ -6,8 +6,12 @@ component signals.
 It owns domain-free frame mechanics: short headers, exchange and stream
 identifiers, request/reply envelopes, streaming frame bodies, subscription
 token inner values, observable-set traits, length-prefixed rkyv archive
-helpers, caller context, thin client-side frame plumbing, and the
-`nota-next` text projection for its own frame-kernel records.
+helpers, caller context, and thin client-side frame plumbing.
+
+The default crate is the binary Rust-to-Rust kernel only. NOTA text
+projection is an explicit `nota-text` feature for thin CLIs and human/agent
+edges; production daemons must be able to depend on `signal-frame` without
+compiling a NOTA parser.
 
 It does not own component domain records, daemon runtime loops, Nexus
 decisions, SEMA storage, policy authority, or universal Sema verbs. Those

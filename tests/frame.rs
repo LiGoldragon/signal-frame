@@ -1,3 +1,4 @@
+#[cfg(feature = "nota-text")]
 use nota_next::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
@@ -483,19 +484,23 @@ fn streaming_frame_short_header_round_trips_and_is_peekable() {
 // `signal_channel!` macro) emits its own record head naming the
 // contract-local verb.
 
+#[cfg(feature = "nota-text")]
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 struct NotaSubmit {
     text: String,
 }
 
+#[cfg(feature = "nota-text")]
 impl RequestPayload for NotaSubmit {}
 
+#[cfg(feature = "nota-text")]
 impl NotaEncode for NotaSubmit {
     fn to_nota(&self) -> String {
         Delimiter::Parenthesis.wrap(["Submit".to_owned(), self.text.to_nota()])
     }
 }
 
+#[cfg(feature = "nota-text")]
 impl NotaDecode for NotaSubmit {
     fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
         let children =
@@ -516,19 +521,23 @@ impl NotaDecode for NotaSubmit {
     }
 }
 
+#[cfg(feature = "nota-text")]
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 struct NotaInbox {
     name: String,
 }
 
+#[cfg(feature = "nota-text")]
 impl RequestPayload for NotaInbox {}
 
+#[cfg(feature = "nota-text")]
 impl NotaEncode for NotaInbox {
     fn to_nota(&self) -> String {
         Delimiter::Parenthesis.wrap(["Inbox".to_owned(), self.name.to_nota()])
     }
 }
 
+#[cfg(feature = "nota-text")]
 impl NotaDecode for NotaInbox {
     fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
         let children = NotaBlock::new(block).expect_children(Delimiter::Parenthesis, "Inbox", 2)?;
@@ -546,14 +555,17 @@ impl NotaDecode for NotaInbox {
     }
 }
 
+#[cfg(feature = "nota-text")]
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 enum NotaChannelRequest {
     Submit(NotaSubmit),
     Inbox(NotaInbox),
 }
 
+#[cfg(feature = "nota-text")]
 impl RequestPayload for NotaChannelRequest {}
 
+#[cfg(feature = "nota-text")]
 impl NotaEncode for NotaChannelRequest {
     fn to_nota(&self) -> String {
         match self {
@@ -563,6 +575,7 @@ impl NotaEncode for NotaChannelRequest {
     }
 }
 
+#[cfg(feature = "nota-text")]
 impl NotaDecode for NotaChannelRequest {
     fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
         let children = NotaBlock::new(block).expect_children(
@@ -586,15 +599,18 @@ impl NotaDecode for NotaChannelRequest {
     }
 }
 
+#[cfg(feature = "nota-text")]
 fn encode_to_text<T: NotaEncode>(value: &T) -> String {
     value.to_nota()
 }
 
+#[cfg(feature = "nota-text")]
 fn decode_request_from_text(text: &str) -> Result<Request<NotaChannelRequest>, NotaDecodeError> {
     NotaSource::new(text).parse::<Request<NotaChannelRequest>>()
 }
 
 #[test]
+#[cfg(feature = "nota-text")]
 fn single_op_request_round_trips_without_outer_verb_wrapper() {
     let payload = NotaChannelRequest::Submit(NotaSubmit {
         text: "hello".into(),
@@ -612,6 +628,7 @@ fn single_op_request_round_trips_without_outer_verb_wrapper() {
 }
 
 #[test]
+#[cfg(feature = "nota-text")]
 fn multi_op_request_round_trips_through_sequence() {
     let request = Request::from_payloads(NonEmpty::from_head_and_tail(
         NotaChannelRequest::Submit(NotaSubmit { text: "one".into() }),

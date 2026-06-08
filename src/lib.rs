@@ -20,6 +20,7 @@
 //! client path.
 
 pub mod caller;
+#[cfg(feature = "nota-text")]
 pub mod command_line;
 pub mod error;
 pub mod exchange;
@@ -30,16 +31,18 @@ pub mod namespace;
 pub mod non_empty;
 pub mod observable;
 pub mod operation_dispatch;
+pub mod operation_heads;
 pub mod reply;
 pub mod request;
 pub mod subscription;
 pub mod version;
 
 pub use caller::{Caller, ExecutablePath, ProcessIdentifier, ProcessStartTime};
+#[cfg(feature = "nota-text")]
 pub use command_line::{
     ClientFrame, ClientShape, CommandLineDispatch, CommandLineError, CommandLineRouteError,
     CommandLineRouteTable, CommandLineSocket, CommandLineSockets, RequestHead, RequestInput,
-    RequestText, SignalOperationHeads, SingleArgument, SingleArgumentError,
+    RequestText, SingleArgument, SingleArgumentError,
 };
 pub use error::FrameError;
 pub use exchange::{
@@ -56,6 +59,7 @@ pub use namespace::{NamespaceSection, SECTION_CUTOFF};
 pub use non_empty::{NonEmpty, NonEmptyError};
 pub use observable::{ObservableSet, ObservationProjection};
 pub use operation_dispatch::OperationDispatchError;
+pub use operation_heads::SignalOperationHeads;
 pub use reply::{
     AcceptedOutcome, BatchErrorClassification, BatchFailureReason, CommitStatus,
     OperationFailureReason, Reply, RequestRejectionReason, RetryClassification, SubReply,

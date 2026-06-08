@@ -1,3 +1,5 @@
+#![cfg(feature = "nota-text")]
+
 use nota_next::{NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{

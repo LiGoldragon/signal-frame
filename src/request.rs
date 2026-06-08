@@ -12,6 +12,7 @@
 //! daemon executor or to payload constructors — not to a kernel
 //! validation function that lies about doing work.
 
+#[cfg(feature = "nota-text")]
 use nota_next::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
@@ -136,6 +137,7 @@ pub enum RequestBuilderError {
 /// verb); a length-N request encodes as a bracketed sequence
 /// `[(Verb ...) (Verb ...) ...]`. Decode peeks the next token — `[`
 /// means sequence, anything else means single payload.
+#[cfg(feature = "nota-text")]
 impl<Payload> NotaEncode for Request<Payload>
 where
     Payload: NotaEncode,
@@ -149,6 +151,7 @@ where
     }
 }
 
+#[cfg(feature = "nota-text")]
 impl<Payload> NotaDecode for Request<Payload>
 where
     Payload: NotaDecode,

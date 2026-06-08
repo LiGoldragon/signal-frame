@@ -1,3 +1,5 @@
+#![cfg(feature = "nota-text")]
+
 use std::{
     io::{Read, Write},
     os::unix::net::{UnixListener, UnixStream},
