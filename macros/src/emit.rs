@@ -487,12 +487,11 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
         quote! { #index => Some(#kind_name::#variant) }
     });
     quote! {
+        #[cfg_attr(feature = "nota-text", derive(::nota_next::NotaEncode, ::nota_next::NotaDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_next::NotaEncode,
-            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -535,12 +534,11 @@ fn emit_reply_kind(block: &ReplyBlockSpec) -> TokenStream {
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
     quote! {
+        #[cfg_attr(feature = "nota-text", derive(::nota_next::NotaEncode, ::nota_next::NotaDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_next::NotaEncode,
-            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -574,12 +572,11 @@ fn emit_event_kind(block: &EventBlockSpec) -> TokenStream {
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
     quote! {
+        #[cfg_attr(feature = "nota-text", derive(::nota_next::NotaEncode, ::nota_next::NotaDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_next::NotaEncode,
-            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -647,12 +644,11 @@ fn emit_stream_kind_and_witnesses(spec: &ChannelSpec) -> TokenStream {
     };
 
     quote! {
+        #[cfg_attr(feature = "nota-text", derive(::nota_next::NotaEncode, ::nota_next::NotaDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
             ::rkyv::Deserialize,
-            ::nota_next::NotaEncode,
-            ::nota_next::NotaDecode,
             Debug,
             Clone,
             Copy,
@@ -819,6 +815,7 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
         }
     });
     quote! {
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaEncode for #name {
             fn to_nota(&self) -> String {
                 match self {
@@ -827,6 +824,7 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
             }
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaDecode for #name {
             fn from_nota_block(
                 block: &::nota_next::Block,
@@ -924,6 +922,7 @@ fn emit_observable_runtime(
             }
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaEncode for #token_type_name {
             fn to_nota(&self) -> String {
                 ::nota_next::Delimiter::Parenthesis.wrap([
@@ -933,6 +932,7 @@ fn emit_observable_runtime(
             }
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaDecode for #token_type_name {
             fn from_nota_block(
                 block: &::nota_next::Block,
@@ -981,6 +981,7 @@ fn emit_observable_runtime(
             }
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaEncode for #opened_type_name {
             fn to_nota(&self) -> String {
                 ::nota_next::Delimiter::Parenthesis.wrap([
@@ -990,6 +991,7 @@ fn emit_observable_runtime(
             }
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaDecode for #opened_type_name {
             fn from_nota_block(
                 block: &::nota_next::Block,
@@ -1225,6 +1227,7 @@ fn emit_default_filter(
             EffectsOnly,
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaEncode for #filter_type {
             fn to_nota(&self) -> String {
                 match self {
@@ -1235,6 +1238,7 @@ fn emit_default_filter(
             }
         }
 
+        #[cfg(feature = "nota-text")]
         impl ::nota_next::NotaDecode for #filter_type {
             fn from_nota_block(
                 block: &::nota_next::Block,

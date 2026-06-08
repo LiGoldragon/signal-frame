@@ -178,7 +178,10 @@ executor lowering, logging, introspection).
 - `signal_channel!` is the standard declaration shape for domain
   channels. The engine is a proc-macro living in the sibling
   `signal-frame-macros` crate; `signal-frame` re-exports it as
-  `pub use signal_frame_macros::signal_channel`.
+  `pub use signal_frame_macros::signal_channel`. Macro-generated
+  binary frame types are always emitted; macro-generated NOTA derives
+  and manual NOTA impls are gated under the consuming crate's
+  `nota-text` feature.
 - `Slot<T>` and `Revision` are wire identity records only. The Sema
   engine owns allocation, lookup, compare-and-set, and persistence.
 - Text rendering/parsing of NOTA records belongs to the NOTA /
@@ -584,8 +587,11 @@ src/frame.rs          ExchangeFrame / ExchangeFrameBody,
                       length-prefix helpers
 tests/frame.rs        rkyv round-trip + NOTA round-trip tests
 tests/channel_macro.rs
-                      positive macro witnesses for non-streaming and
+                      nota-text macro witnesses for non-streaming and
                       streaming channels
+tests/channel_macro_binary.rs
+                      default-mode witness that signal_channel! emits a
+                      binary frame surface without requiring nota-next
 tests/ui/channel_macro/
                       compile-fail macro witnesses
 

@@ -13,6 +13,13 @@ projection is an explicit `nota-text` feature for thin CLIs and human/agent
 edges; production daemons must be able to depend on `signal-frame` without
 compiling a NOTA parser.
 
+`signal_channel!` follows the same boundary. Its generated operation,
+reply, event, kind, stream, and observer-helper types are binary by
+default; generated NOTA derives and manual NOTA impls are emitted under
+the consuming crate's `nota-text` feature only. A contract crate can keep
+the macro-generated frame surface in its daemon/default build and reserve
+text parsing/rendering for CLI or witness builds.
+
 It does not own component domain records, daemon runtime loops, Nexus
 decisions, SEMA storage, policy authority, or universal Sema verbs. Those
 belong to generated component contracts, `triad-runtime`, `sema-engine`, or
