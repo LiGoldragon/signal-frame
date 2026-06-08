@@ -44,7 +44,7 @@ The `signal_cli!` macro emits a complete thin CLI when the working and
 meta contracts follow the component naming convention:
 
 ```rust
-signal_frame::signal_cli!(spirit, signal_persona_spirit);
+signal_frame::signal_cli!(spirit, signal_spirit);
 ```
 
 Generated CLIs enforce the single-argument rule, route request heads to
