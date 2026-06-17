@@ -620,7 +620,7 @@ fn single_op_request_round_trips_without_outer_verb_wrapper() {
 
     // No `(Assert ...)` outer wrapper — the payload itself names the
     // contract-local verb via its record head.
-    assert_eq!(text, "(Submit [hello])");
+    assert_eq!(text, "(Submit hello)");
 
     let decoded = decode_request_from_text(&text).expect("decode");
     assert_eq!(decoded, request);
@@ -638,7 +638,7 @@ fn multi_op_request_round_trips_through_sequence() {
     ));
     let text = encode_to_text(&request);
 
-    assert_eq!(text, "[(Submit [one]) (Inbox [operator])]");
+    assert_eq!(text, "[(Submit one) (Inbox operator)]");
 
     let decoded = decode_request_from_text(&text).expect("decode");
     assert_eq!(decoded, request);

@@ -84,8 +84,7 @@ use message::{
 };
 use meta_message::Operation as MetaMessageOperation;
 use std::future::Future;
-use std::sync::Arc;
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 
 signal_frame::signal_cli! {
     pub struct MessageCommandLineDispatch {
@@ -107,14 +106,8 @@ fn encode_to_text<T: NotaEncode>(value: &T) -> String {
 }
 
 fn block_on_ready<Output>(future: impl Future<Output = Output>) -> Output {
-    struct NoopWake;
-
-    impl Wake for NoopWake {
-        fn wake(self: Arc<Self>) {}
-    }
-
-    let waker = Waker::from(Arc::new(NoopWake));
-    let mut context = Context::from_waker(&waker);
+    let waker = Waker::noop();
+    let mut context = Context::from_waker(waker);
     let mut future = Box::pin(future);
     match future.as_mut().poll(&mut context) {
         Poll::Ready(output) => output,
@@ -155,7 +148,7 @@ fn macro_emits_contract_local_operation_enum_without_signal_verb() {
 
     let request = operation.into_request();
     assert_eq!(request.payloads().len(), 1);
-    assert_eq!(encode_to_text(&request), "(Submit ([hello]))");
+    assert_eq!(encode_to_text(&request), "(Submit (hello))");
 }
 
 #[test]
@@ -166,7 +159,7 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
     ));
     let text = encode_to_text(&request);
 
-    assert_eq!(text, "[(Submit ([first])) (Query ([operator]))]");
+    assert_eq!(text, "[(Submit (first)) (Query (operator))]");
 
     let decoded = NotaSource::new(&text)
         .parse::<signal_frame::Request<MessageOperation>>()

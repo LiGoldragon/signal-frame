@@ -191,7 +191,7 @@ fn client_shape_sends_request_with_caller_and_prints_reply() {
     });
 
     let argument =
-        SingleArgument::from_arguments(["spirit".to_string(), "(Submit ([hello]))".to_string()])
+        SingleArgument::from_arguments(["spirit".to_string(), "(Submit (hello))".to_string()])
             .expect("argument");
     let client = ClientShape::<working::Frame, meta::Frame>::new(CommandLineSockets::working_only(
         socket.clone(),
@@ -234,7 +234,7 @@ fn client_shape_prints_multi_operation_replies_as_sequence() {
 
     let argument = SingleArgument::from_arguments([
         "spirit".to_string(),
-        "[(Submit ([hello])) (Submit ([again]))]".to_string(),
+        "[(Submit (hello)) (Submit (again))]".to_string(),
     ])
     .expect("argument");
     let client = ClientShape::<working::Frame, meta::Frame>::new(CommandLineSockets::working_only(
