@@ -4,29 +4,28 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    fenix = {
-      url = "github:nix-community/fenix";
+    rust-build = {
+      url = "github:LiGoldragon/rust-build";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, flake-utils, fenix, crane }:
+  outputs = { self, nixpkgs, flake-utils, rust-build }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        toolchain = fenix.packages.${system}.fromToolchainFile {
+        rust = rust-build.lib.${system}.fromToolchainFile pkgs {
           file = ./rust-toolchain.toml;
           sha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
         };
-        craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
-        src = pkgs.lib.cleanSourceWith {
-          src = ./.;
-          filter = path: type:
-            (craneLib.filterCargoSources path type)
-            || (builtins.match ".*\\.schema$" path != null)
-            || (builtins.match ".*\\.stderr$" path != null)
-            || (builtins.match ".*/tests/golden/.*\\.bin$" path != null);
+        inherit (rust) craneLib toolchain;
+        sourceExtraFilter = path: _type:
+          (builtins.match ".*\\.schema$" path != null)
+          || (builtins.match ".*\\.stderr$" path != null)
+          || (builtins.match ".*/tests/golden/.*\\.bin$" path != null);
+        src = rust.cleanSource {
+          root = ./.;
+          extraFilters = [ sourceExtraFilter ];
         };
         commonArgs = {
           inherit src;
