@@ -8,7 +8,7 @@ use std::{
     process::ExitCode,
 };
 
-use nota_next::{Block, Delimiter, Document, NotaDecode, NotaEncode, NotaSource};
+use nota::{Block, Delimiter, Document, NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 

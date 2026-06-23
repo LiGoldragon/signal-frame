@@ -131,7 +131,7 @@ executor lowering, logging, introspection).
   single-argument rule, parses the argument as NOTA text or a file path,
   dispatches request heads to ordinary vs meta sockets, injects
   `Caller::from_kernel()`, sends length-prefixed frames, and renders the
-  typed reply payload back to NOTA through `nota-next`. Component crates still own their
+  typed reply payload back to NOTA through `nota`. Component crates still own their
   domain records, socket deployment paths, daemon behavior, and
   authorization policy.
 
@@ -185,7 +185,7 @@ executor lowering, logging, introspection).
 - `Slot<T>` and `Revision` are wire identity records only. The Sema
   engine owns allocation, lookup, compare-and-set, and persistence.
 - Text rendering/parsing of NOTA records belongs to the NOTA /
-  Nexus projection layers. `signal-frame` exposes `nota-next` only
+  Nexus projection layers. `signal-frame` exposes `nota` only
   through `nota-text` for its own thin-CLI and frame-kernel text
   projections; the default binary kernel does not carry a text codec.
 
@@ -591,7 +591,7 @@ tests/channel_macro.rs
                       streaming channels
 tests/channel_macro_binary.rs
                       default-mode witness that signal_channel! emits a
-                      binary frame surface without requiring nota-next
+                      binary frame surface without requiring nota
 tests/ui/channel_macro/
                       compile-fail macro witnesses
 

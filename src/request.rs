@@ -13,7 +13,7 @@
 //! validation function that lies about doing work.
 
 #[cfg(feature = "nota-text")]
-use nota_next::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
+use nota::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 

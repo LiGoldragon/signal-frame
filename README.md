@@ -6,7 +6,7 @@ communication in the primary workspace.
 `signal-frame` owns the universal request/reply spine, protocol
 version records, length-prefixed rkyv frame helpers, exchange
 identifiers, async correlation primitives, stream / subscription
-lifecycle, reply plumbing, and `nota-next` projection for its own
+lifecycle, reply plumbing, and `nota` projection for its own
 frame-kernel records. It also owns the shared `signal_cli!` thin-client skeleton
 used by component CLIs: one NOTA argument in, one typed frame to the
 daemon, one NOTA reply out. Domain records and contract-local operation
