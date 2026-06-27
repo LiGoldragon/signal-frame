@@ -5,6 +5,19 @@ use std::{
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CallerIdentity(String);
+
+impl CallerIdentity {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(
     Archive,
     RkyvSerialize,
@@ -64,9 +77,10 @@ impl ProcessStartTime {
     }
 }
 
-/// Advisory process context captured by a thin CLI before it sends a frame.
+/// Advisory caller context captured or supplied by a thin CLI before it sends a frame.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
+    pub identity: Option<CallerIdentity>,
     pub pid: ProcessIdentifier,
     pub executable: Option<ExecutablePath>,
     pub start_time: Option<ProcessStartTime>,
@@ -79,10 +93,30 @@ impl Caller {
         start_time: Option<ProcessStartTime>,
     ) -> Self {
         Self {
+            identity: None,
             pid,
             executable,
             start_time,
         }
+    }
+
+    pub fn current_process() -> Self {
+        let process_identifier = std::process::id();
+        Self {
+            identity: None,
+            pid: ProcessIdentifier::new(process_identifier),
+            executable: std::env::current_exe().ok().map(ExecutablePath::new),
+            start_time: process_start_time(process_identifier).map(ProcessStartTime::new),
+        }
+    }
+
+    pub fn identity(&self) -> Option<&CallerIdentity> {
+        self.identity.as_ref()
+    }
+
+    pub fn with_identity(mut self, identity: Option<CallerIdentity>) -> Self {
+        self.identity = identity;
+        self
     }
 
     /// Capture the parent process context for a CLI invocation.
@@ -95,9 +129,10 @@ impl Caller {
             return None;
         }
         Some(Self {
+            identity: None,
             pid: ProcessIdentifier::new(parent),
             executable: parent_executable(parent).map(ExecutablePath::new),
-            start_time: parent_start_time(parent).map(ProcessStartTime::new),
+            start_time: process_start_time(parent).map(ProcessStartTime::new),
         })
     }
 }
@@ -106,8 +141,8 @@ fn parent_executable(parent: u32) -> Option<PathBuf> {
     fs::read_link(format!("/proc/{parent}/exe")).ok()
 }
 
-fn parent_start_time(parent: u32) -> Option<u64> {
-    let stat = fs::read_to_string(format!("/proc/{parent}/stat")).ok()?;
+fn process_start_time(process_identifier: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{process_identifier}/stat")).ok()?;
     start_time_ticks(&stat)
 }
 

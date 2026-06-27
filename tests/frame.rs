@@ -2,12 +2,13 @@
 use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    AcceptedOutcome, BatchErrorClassification, BatchFailureReason, CommitStatus, ExchangeFrame,
-    ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRejectionReason,
-    HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty, OperationFailureReason,
-    ProtocolVersion, Reply, Request, RequestPayload, RetryClassification, Revision, SessionEpoch,
-    ShortHeader, Slot, StreamEventIdentifier, StreamingFrame, StreamingFrameBody, SubReply,
-    SubscriptionTokenInner, short_header_from_archive, short_header_from_length_prefixed,
+    AcceptedOutcome, BatchErrorClassification, BatchFailureReason, Caller, CallerIdentity,
+    CommitStatus, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError,
+    HandshakeRejectionReason, HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty,
+    OperationFailureReason, ProcessIdentifier, ProtocolVersion, Reply, Request, RequestPayload,
+    RetryClassification, Revision, SessionEpoch, ShortHeader, Slot, StreamEventIdentifier,
+    StreamingFrame, StreamingFrameBody, SubReply, SubscriptionTokenInner,
+    short_header_from_archive, short_header_from_length_prefixed,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -114,6 +115,31 @@ fn request_frame_round_trips() {
         }
         _ => panic!("expected request frame"),
     }
+}
+
+#[test]
+fn request_frame_round_trips_caller_identity() {
+    let request = DomainRequest::new("Node").into_request().with_caller(Some(
+        Caller::new(ProcessIdentifier::new(7), None, None)
+            .with_identity(Some(CallerIdentity::new("designer"))),
+    ));
+    let frame = ExchangeFrame::<DomainRequest, DomainReply>::new(ExchangeFrameBody::Request {
+        exchange: fresh_exchange(),
+        request,
+    });
+
+    let bytes = frame.encode_length_prefixed().unwrap();
+    let decoded =
+        ExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+
+    let ExchangeFrameBody::Request { request, .. } = decoded.into_body() else {
+        panic!("expected request frame");
+    };
+    let identity = request
+        .caller()
+        .and_then(Caller::identity)
+        .expect("caller identity survives frame round trip");
+    assert_eq!(identity.as_str(), "designer");
 }
 
 #[test]

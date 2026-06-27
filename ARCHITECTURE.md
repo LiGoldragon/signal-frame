@@ -72,7 +72,7 @@ executor lowering, logging, introspection).
 - `NonEmpty<T>` — the type-level non-empty sequence used as the
   ordered payload unit inside `Request`.
 - `Request<Payload>` carrying `NonEmpty<Payload>` as the ordered
-  exchange unit plus optional advisory `Caller` process context, with
+  exchange unit plus optional advisory `Caller` context, with
   feature-gated NOTA codec (single payload + bracketed sequence). Each
   payload is itself a contract operation; the payload's NOTA record head
   names the contract-local verb. No per-operation wrapper appears — the
@@ -81,10 +81,12 @@ executor lowering, logging, introspection).
   is injected by thin CLIs at the frame boundary. The codec exists only
   under `nota-text`, so daemon default dependency trees keep the binary
   frame kernel without a NOTA parser.
-- `Caller`, `ProcessIdentifier`, `ExecutablePath`, and
-  `ProcessStartTime` — best-effort parent-process context captured by
-  a component CLI with `getppid()` plus Linux `/proc` facts. This is an
-  audit/debug witness, not an authority proof.
+- `Caller`, `CallerIdentity`, `ProcessIdentifier`, `ExecutablePath`, and
+  `ProcessStartTime` — best-effort caller context captured or supplied by
+  a component CLI. `CallerIdentity` is the component-facing claimed caller
+  label; process facts come from `getppid()` or the current process plus
+  Linux `/proc` facts. This is an audit/debug and routing witness, not an
+  authority proof.
 - `Reply<ReplyPayload>` typed sum: `Accepted { outcome,
   per_operation }` vs `Rejected { reason }`. `AcceptedOutcome`
   distinguishes `Committed` from `OperationAborted { failed_at,
@@ -148,9 +150,9 @@ executor lowering, logging, introspection).
 - Authentication, provenance, or socket-peer policy. Local trust
   belongs to daemon/socket ingress and to dedicated contracts such
   as `signal-persona-origin`.
-- Caller authentication. `Caller` is advisory process context; daemon
-  ingress must use socket credentials and policy contracts for actual
-  authority decisions.
+- Caller authentication. `Caller` is advisory caller context; daemon ingress
+  must use socket credentials and policy contracts for actual authority
+  decisions.
 - Slot allocation, slot dereference, or revision bump behavior.
   Those belong to the Sema engine.
 - Nexus text parsing or rendering over NOTA syntax beyond the codec
@@ -201,7 +203,8 @@ executor lowering, logging, introspection).
 - Every incoming archive is bytechecked before deserialization.
 - `ExchangeFrameBody` / `StreamingFrameBody` carry handshake /
   request / reply (plus subscription-event on the streaming form)
-  bodies. No in-band authentication or provenance material.
+  bodies. Request bodies may carry advisory caller context; they do
+  not carry an authority proof.
 - Domain payloads remain typed. `signal-frame` does not become a
   generic record bag.
 - `Caller` is not part of the human NOTA request text. CLI-generated

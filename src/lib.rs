@@ -37,7 +37,7 @@ pub mod request;
 pub mod subscription;
 pub mod version;
 
-pub use caller::{Caller, ExecutablePath, ProcessIdentifier, ProcessStartTime};
+pub use caller::{Caller, CallerIdentity, ExecutablePath, ProcessIdentifier, ProcessStartTime};
 #[cfg(feature = "nota-text")]
 pub use command_line::{
     ClientFrame, ClientShape, CommandLineDispatch, CommandLineError, CommandLineRouteError,
