@@ -38,6 +38,14 @@ Components depend on `signal-frame` for the wire kernel and on
 `signal-sema` when they need typed Sema operations internally (for
 executor lowering, logging, introspection).
 
+## 0.5 · Direction
+
+The frame kernel is domain-free and verb-free at the universal layer. Per-component contract crates depend on it and supply their own contract-local operation roots in domain-verb form; `signal-frame` adds no domain meaning. `signal_channel!` follows the same boundary: generated frame types are binary by default; NOTA derives and manual NOTA impls are gated under the consuming crate's `nota-text` feature so production daemons depend on `signal-frame` without a NOTA parser.
+
+The ordinary/meta split is a contract/rebuild boundary, not an engine split. Both `signal-<component>` and `meta-signal-<component>` contracts depend on the same frame kernel; the split is enforced by which crate a caller depends on, not by frame-layer machinery.
+
+Streaming push uses this crate as the low-level wire kernel only: `StreamingFrameBody::SubscriptionEvent` and `SubscriptionTokenInner` are the binary transport shape; `triad-runtime` owns reusable token issuance, registries, and event-frame publication; component daemons supply stream filters and delivery IO.
+
 ## 1 · Owns
 
 - Two frame types and their bodies — one per channel shape — plus
