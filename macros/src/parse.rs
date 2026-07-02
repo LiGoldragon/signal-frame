@@ -151,9 +151,13 @@ impl Parse for ReplyBlockSpec {
 impl Parse for ReplyVariantSpec {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let variant_name = input.parse::<Ident>()?;
-        let payload;
-        syn::parenthesized!(payload in input);
-        let payload_type = payload.parse::<Type>()?;
+        let payload_type = if input.peek(syn::token::Paren) {
+            let payload;
+            syn::parenthesized!(payload in input);
+            Some(payload.parse::<Type>()?)
+        } else {
+            None
+        };
         Ok(ReplyVariantSpec {
             variant_name,
             payload_type,

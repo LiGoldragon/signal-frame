@@ -172,10 +172,11 @@ fn validate_record_head_uniqueness(spec: &ChannelSpec) -> syn::Result<()> {
         "request",
     )?;
     flag_duplicate_record_heads(
-        spec.reply
-            .variants
-            .iter()
-            .map(|v| (&v.variant_name, &v.payload_type)),
+        spec.reply.variants.iter().filter_map(|v| {
+            v.payload_type
+                .as_ref()
+                .map(|payload| (&v.variant_name, payload))
+        }),
         "reply",
     )?;
     if let Some(event) = &spec.event {

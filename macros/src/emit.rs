@@ -106,7 +106,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
     let mut reply_variants = clone_reply_variants(&spec.reply.variants);
     reply_variants.push(ReplyVariantSpec {
         variant_name: opened_variant_name.clone(),
-        payload_type: opened_type,
+        payload_type: Some(opened_type),
     });
 
     let mut event_variants: Vec<EventVariantSpec> = spec
@@ -268,19 +268,21 @@ fn emit_reply_enum(block: &ReplyBlockSpec) -> TokenStream {
     let name = &block.name;
     let variants = block.variants.iter().map(|v| {
         let variant_name = &v.variant_name;
-        let payload = &v.payload_type;
-        quote! { #variant_name(#payload) }
+        match &v.payload_type {
+            Some(payload) => quote! { #variant_name(#payload) },
+            None => quote! { #variant_name },
+        }
     });
-    let from_impls = block.variants.iter().map(|v| {
+    let from_impls = block.variants.iter().filter_map(|v| {
         let variant_name = &v.variant_name;
-        let payload = &v.payload_type;
-        quote! {
+        let payload = v.payload_type.as_ref()?;
+        Some(quote! {
             impl From<#payload> for #name {
                 fn from(payload: #payload) -> Self {
                     Self::#variant_name(payload)
                 }
             }
-        }
+        })
     });
     quote! {
         #[derive(
@@ -531,7 +533,11 @@ fn emit_reply_kind(block: &ReplyBlockSpec) -> TokenStream {
     });
     let arms = block.variants.iter().map(|v| {
         let variant = &v.variant_name;
-        quote! { Self::#variant(_) => #kind_name::#variant }
+        if v.payload_type.is_some() {
+            quote! { Self::#variant(_) => #kind_name::#variant }
+        } else {
+            quote! { Self::#variant => #kind_name::#variant }
+        }
     });
     quote! {
         #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
@@ -750,7 +756,7 @@ fn emit_nota_codecs(spec: &ChannelSpec) -> TokenStream {
 
 struct PayloadKind<'spec> {
     variant: &'spec syn::Ident,
-    payload: &'spec syn::Type,
+    payload: Option<&'spec syn::Type>,
 }
 
 fn payload_kinds(block: &RequestBlockSpec) -> Vec<PayloadKind<'_>> {
@@ -759,7 +765,7 @@ fn payload_kinds(block: &RequestBlockSpec) -> Vec<PayloadKind<'_>> {
         .iter()
         .map(|v| PayloadKind {
             variant: &v.variant_name,
-            payload: &v.payload_type,
+            payload: Some(&v.payload_type),
         })
         .collect()
 }
@@ -770,7 +776,7 @@ fn payload_kinds_reply(block: &ReplyBlockSpec) -> Vec<PayloadKind<'_>> {
         .iter()
         .map(|v| PayloadKind {
             variant: &v.variant_name,
-            payload: &v.payload_type,
+            payload: v.payload_type.as_ref(),
         })
         .collect()
 }
@@ -781,7 +787,7 @@ fn payload_kinds_event(block: &EventBlockSpec) -> Vec<PayloadKind<'_>> {
         .iter()
         .map(|v| PayloadKind {
             variant: &v.variant_name,
-            payload: &v.payload_type,
+            payload: Some(&v.payload_type),
         })
         .collect()
 }
@@ -791,28 +797,41 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
     let encode_arms = kinds.iter().map(|k| {
         let variant = &k.variant;
         let variant_string = variant.to_string();
-        let payload = &k.payload;
-        quote! {
-            Self::#variant(payload) => {
-                ::nota::Delimiter::Parenthesis.wrap([
-                    #variant_string.to_owned(),
-                    <#payload as ::nota::NotaEncode>::to_nota(payload),
-                ])
-            }
+        match k.payload {
+            Some(payload) => quote! {
+                Self::#variant(payload) => {
+                    ::nota::Delimiter::Parenthesis.wrap([
+                        #variant_string.to_owned(),
+                        <#payload as ::nota::NotaEncode>::to_nota(payload),
+                    ])
+                }
+            },
+            None => quote! {
+                Self::#variant => #variant_string.to_owned()
+            },
         }
     });
-    let decode_arms = kinds.iter().map(|k| {
+    let decode_payload_arms = kinds.iter().filter_map(|k| {
         let variant = &k.variant;
         let variant_string = variant.to_string();
-        let payload = &k.payload;
-        quote! {
+        let payload = k.payload?;
+        Some(quote! {
             #variant_string => {
                 let payload = <#payload as ::nota::NotaDecode>::from_nota_block(
                     &children[1],
                 )?;
                 Ok(Self::#variant(payload))
             }
-        }
+        })
+    });
+    let decode_unit_arms = kinds.iter().filter_map(|k| {
+        let variant = &k.variant;
+        let variant_string = variant.to_string();
+        k.payload.is_none().then(|| {
+            quote! {
+                #variant_string => Ok(Self::#variant)
+            }
+        })
     });
     quote! {
         #[cfg(feature = "nota-text")]
@@ -829,6 +848,16 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
             fn from_nota_block(
                 block: &::nota::Block,
             ) -> Result<Self, ::nota::NotaDecodeError> {
+                if let Some(head) = block.demote_to_string() {
+                    return match head {
+                        #( #decode_unit_arms, )*
+                        other => Err(::nota::NotaDecodeError::UnknownVariant {
+                            enum_name: #enum_name_string,
+                            variant: other.to_string(),
+                        }),
+                    };
+                }
+
                 let children = ::nota::NotaBlock::new(block).expect_children(
                     ::nota::Delimiter::Parenthesis,
                     #enum_name_string,
@@ -840,7 +869,7 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
                         type_name: #enum_name_string,
                     })?;
                 match head {
-                    #( #decode_arms, )*
+                    #( #decode_payload_arms, )*
                     other => Err(::nota::NotaDecodeError::UnknownVariant {
                         enum_name: #enum_name_string,
                         variant: other.to_string(),

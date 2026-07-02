@@ -78,6 +78,20 @@ mod meta_message {
     }
 }
 
+mod unit_reply {
+    use super::*;
+
+    signal_channel! {
+        channel UnitReply {
+            operation Submit(Submission),
+        }
+        reply Reply {
+            Accepted(Receipt),
+            NotFound,
+        }
+    }
+}
+
 use message::{
     Frame as MessageFrame, Operation as MessageOperation, OperationKind as MessageOperationKind,
     Reply as MessageReply,
@@ -165,6 +179,41 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
         .parse::<signal_frame::Request<MessageOperation>>()
         .expect("decode");
     assert_eq!(decoded, request);
+}
+
+#[test]
+fn macro_unit_reply_round_trips_as_bare_nota_atom() {
+    let reply = unit_reply::Reply::NotFound;
+    assert_eq!(reply.kind(), unit_reply::ReplyKind::NotFound);
+    assert_eq!(reply.to_nota(), "NotFound");
+
+    let decoded = NotaSource::new("NotFound")
+        .parse::<unit_reply::Reply>()
+        .expect("decode bare unit reply");
+    assert_eq!(decoded, reply);
+}
+
+#[test]
+fn macro_unit_reply_round_trips_through_binary_frame() {
+    let frame = unit_reply::Frame::new(ExchangeFrameBody::Reply {
+        exchange: fresh_exchange(),
+        reply: signal_frame::Reply::committed(NonEmpty::single(SubReply::Ok(
+            unit_reply::Reply::NotFound,
+        ))),
+    });
+
+    let bytes = frame.encode_length_prefixed().expect("encode unit reply");
+    let decoded = unit_reply::Frame::decode_length_prefixed(&bytes).expect("decode unit reply");
+    let ExchangeFrameBody::Reply { reply, .. } = decoded.into_body() else {
+        panic!("expected reply body");
+    };
+    let signal_frame::Reply::Accepted { per_operation, .. } = reply else {
+        panic!("expected accepted reply");
+    };
+    assert_eq!(
+        per_operation.into_head(),
+        SubReply::Ok(unit_reply::Reply::NotFound)
+    );
 }
 
 #[test]

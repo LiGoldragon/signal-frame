@@ -51,7 +51,7 @@ pub(crate) struct RequestVariantSpec {
 #[derive(Clone)]
 pub(crate) struct ReplyVariantSpec {
     pub(crate) variant_name: Ident,
-    pub(crate) payload_type: Type,
+    pub(crate) payload_type: Option<Type>,
 }
 
 #[derive(Clone)]
