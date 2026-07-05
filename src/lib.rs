@@ -14,7 +14,7 @@
 //! The `signal_channel!` macro lives in the sibling
 //! `signal-frame-macros` crate and is re-exported from this crate for
 //! hand-written contracts that have not yet moved to
-//! `schema-rust-next` build generation.
+//! `schema-rust` build generation.
 //!
 //! `signal_cli!` emits thin component CLI binaries over the shared frame
 //! client path.

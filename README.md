@@ -20,7 +20,7 @@ to the sibling crate `signal-sema`, where they describe the
 internal Sema-engine execution vocabulary rather than public
 wire-contract verbs.
 
-Schema-driven Rust generation lives in `schema-rust-next` build
+Schema-driven Rust generation lives in `schema-rust` build
 generation, not in a `signal-frame` proc macro. The frame kernel is a
 dependency of generated contracts; it is not the schema emitter.
 

@@ -67,7 +67,7 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   `Frame::with_short_header(short_header, body)`.
 - The `ShortHeader` prefix that schema-generated route projections
   consume. Richer schema-defined header surfaces are emitted by
-  `schema-rust-next` in component crates; this kernel owns only the
+  `schema-rust` in component crates; this kernel owns only the
   frame prefix and peek helpers.
 - `ProtocolVersion`, `ExchangeMode`, `ExchangeHandshake`, and
   handshake request/reply records.
@@ -621,12 +621,12 @@ macros/               sibling proc-macro crate
 `signal-frame` is the wire kernel. It owns `Frame`, `ShortHeader`,
 `Caller`, request/reply mechanics, and the streaming subscription
 envelope. Schema-generated component contracts consume these kernel
-types from generated Rust emitted by `schema-rust-next`.
+types from generated Rust emitted by `schema-rust`.
 
 Schema generation does not live in this repo. The retired local
 `schema-rust` composer and `emit_schema!` proc-macro path have been
 removed. Component crates that are on the schema-derived stack use
-`schema-rust-next` build generation (`schema_rust_next::build`) to
+`schema-rust` build generation (`schema_rust::build`) to
 write source-visible generated modules.
 
 The sibling `macros/` proc-macro crate remains for the current

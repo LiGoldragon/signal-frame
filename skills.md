@@ -17,7 +17,7 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
   prove behavior by grepping strings.
 - Use full English identifiers and keep reusable behavior on
   data-bearing types.
-- Schema-driven Rust generation lives in `schema-rust-next` build
+- Schema-driven Rust generation lives in `schema-rust` build
   generation, not in `signal-frame`. This crate re-exports
   `signal_channel!` for current hand-written contracts while those
   contracts migrate.

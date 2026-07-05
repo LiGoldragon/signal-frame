@@ -3,7 +3,7 @@
 Proc-macro front door for `signal_channel!` and the migration-named
 alias `legacy_signal_channel!`.
 
-Schema-driven Rust generation lives in `schema-rust-next` build
+Schema-driven Rust generation lives in `schema-rust` build
 generation. This proc-macro crate keeps the current hand-written
 contract declaration grammar alive while contracts migrate.
 
