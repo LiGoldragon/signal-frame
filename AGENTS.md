@@ -1,14 +1,7 @@
 # signal-frame — Agent Instructions
 
-This repo follows the primary workspace contract. Read:
-
-1. `/home/li/primary/ESSENCE.md`
-2. `/home/li/primary/lore/AGENTS.md`
-3. `/home/li/primary/skills/rust-discipline.md`
-4. `/home/li/primary/skills/contract-repo.md`
-5. `INTENT.md`
-6. `ARCHITECTURE.md`
-7. `skills.md`
+Read this repository's `INTENT.md`, `ARCHITECTURE.md`, and `skills.md` before
+editing.
 
 `signal-frame` is the frame-mechanics contract repo, renamed from the
 former `signal-core`. Keep runtime actors, reducers, stores, terminal
