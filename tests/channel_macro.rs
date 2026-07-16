@@ -162,7 +162,7 @@ fn macro_emits_contract_local_operation_enum_without_signal_verb() {
 
     let request = operation.into_request();
     assert_eq!(request.payloads().len(), 1);
-    assert_eq!(encode_to_text(&request), "(Submit (hello))");
+    assert_eq!(encode_to_text(&request), "(Submit {hello})");
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
     ));
     let text = encode_to_text(&request);
 
-    assert_eq!(text, "[(Submit (first)) (Query (operator))]");
+    assert_eq!(text, "[(Submit {first}) (Query {operator})]");
 
     let decoded = NotaSource::new(&text)
         .parse::<signal_frame::Request<MessageOperation>>()
