@@ -21,14 +21,14 @@ default = []
 nota-text = ["dep:nota"]
 
 [dependencies]
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main", optional = true }
+nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "train/synchronizer-live-proof", optional = true }
 paste = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 signal-frame-macros = { version = "0.1", path = "macros" }
 thiserror = "2"
 
 [dev-dependencies]
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
+nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "train/synchronizer-live-proof" }
 trybuild = "1"
 
 [lints.rust]

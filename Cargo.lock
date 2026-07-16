@@ -141,8 +141,8 @@ dependencies = [
 
 [[package]]
 name = "nota"
-version = "0.5.1"
-source = "git+https://github.com/LiGoldragon/nota.git?branch=main#bea7e2840ac2cf3e384f07b5c10eeb0890cead25"
+version = "0.7.0"
+source = "git+https://github.com/LiGoldragon/nota.git?branch=train%2Fsynchronizer-live-proof#bcb6fabdb1ddccf20ccd88c25183060ba99d64d2"
 dependencies = [
  "nota-derive",
  "rkyv",
@@ -151,7 +151,7 @@ dependencies = [
 [[package]]
 name = "nota-derive"
 version = "0.3.0"
-source = "git+https://github.com/LiGoldragon/nota.git?branch=main#bea7e2840ac2cf3e384f07b5c10eeb0890cead25"
+source = "git+https://github.com/LiGoldragon/nota.git?branch=train%2Fsynchronizer-live-proof#bcb6fabdb1ddccf20ccd88c25183060ba99d64d2"
 dependencies = [
  "proc-macro2",
  "quote",
