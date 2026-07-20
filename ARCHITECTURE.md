@@ -623,6 +623,10 @@ macros/               sibling proc-macro crate
 envelope. Schema-generated component contracts consume these kernel
 types from generated Rust emitted by `schema-rust`.
 
+The maintained `legacy-0v3` release line pins its optional NOTA projection to
+the immutable legacy Nota family so legacy schema-generated contracts share one
+codec trait universe. Current main may evolve independently.
+
 Schema generation does not live in this repo. The retired local
 `schema-rust` composer and `emit_schema!` proc-macro path have been
 removed. Component crates that are on the schema-derived stack use

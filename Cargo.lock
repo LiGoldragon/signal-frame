@@ -142,7 +142,7 @@ dependencies = [
 [[package]]
 name = "nota"
 version = "0.5.1"
-source = "git+https://github.com/LiGoldragon/nota.git?branch=main#bea7e2840ac2cf3e384f07b5c10eeb0890cead25"
+source = "git+https://github.com/LiGoldragon/nota.git?rev=ce7c564de0a0518eaa1938d55dccc460a67cadb4#ce7c564de0a0518eaa1938d55dccc460a67cadb4"
 dependencies = [
  "nota-derive",
  "rkyv",
@@ -151,7 +151,7 @@ dependencies = [
 [[package]]
 name = "nota-derive"
 version = "0.3.0"
-source = "git+https://github.com/LiGoldragon/nota.git?branch=main#bea7e2840ac2cf3e384f07b5c10eeb0890cead25"
+source = "git+https://github.com/LiGoldragon/nota.git?rev=ce7c564de0a0518eaa1938d55dccc460a67cadb4#ce7c564de0a0518eaa1938d55dccc460a67cadb4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -321,7 +321,7 @@ dependencies = [
 
 [[package]]
 name = "signal-frame"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "nota",
  "paste",
