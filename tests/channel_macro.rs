@@ -20,8 +20,12 @@ impl WireContract for TestContract {
 }
 
 fn bound_header(root: u8) -> ShortHeader {
+    bound_header_with_route(root, 0)
+}
+
+fn bound_header_with_route(root: u8, variant: u8) -> ShortHeader {
     message::Frame::new(
-        WireRoute::new(RootCode::new(root), VariantCode::new(0)),
+        WireRoute::new(RootCode::new(root), VariantCode::new(variant)),
         ExchangeFrameBody::HandshakeRequest(signal_frame::HandshakeRequest::current()),
     )
     .short_header()
@@ -260,6 +264,10 @@ fn macro_emits_log_variant_for_operation_short_headers() {
     assert_eq!(signal_frame::LogVariant::log_variant(&submit), 0);
     assert_eq!(signal_frame::LogVariant::log_variant(&query), 1);
     assert_eq!(
+        submit.into_request().route().unwrap(),
+        WireRoute::new(RootCode::new(0), VariantCode::new(0))
+    );
+    assert_eq!(
         query.into_request().route().unwrap(),
         WireRoute::new(RootCode::new(1), VariantCode::new(0))
     );
@@ -269,6 +277,14 @@ fn macro_emits_log_variant_for_operation_short_headers() {
     );
     assert_eq!(
         MessageOperation::kind_from_short_header(bound_header(99)),
+        None
+    );
+    assert_eq!(
+        MessageOperation::kind_from_short_header(bound_header_with_route(0, 1)),
+        None
+    );
+    assert_eq!(
+        MessageOperation::kind_from_short_header(bound_header_with_route(1, 1)),
         None
     );
 }
@@ -314,6 +330,29 @@ fn macro_emits_operation_dispatch_handler_surface() {
             signal_frame::OperationDispatchError::UnknownOperationRoot { root: 99 }
         )
     ));
+}
+
+#[test]
+fn operation_dispatch_rejects_forged_variant_before_handler() {
+    use message::OperationDispatch;
+
+    let mut handler = MessageHandler::default();
+    let forged = block_on_ready(handler.dispatch(
+        bound_header_with_route(0, 9),
+        MessageOperation::Submit(Submission::new("forged route")),
+    ))
+    .expect_err("nonzero route variant is rejected before dispatch");
+
+    assert!(matches!(
+        forged,
+        MessageDispatchError::Dispatch(
+            signal_frame::OperationDispatchError::UnknownOperationVariant {
+                root: 0,
+                variant: 9,
+            }
+        )
+    ));
+    assert!(handler.handled.is_empty(), "forged route reached handler");
 }
 
 #[test]

@@ -400,6 +400,10 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
             #request_name::#variant_name(payload) => self.#method_name(payload).await
         }
     });
+    let known_root_arms = request.variants.iter().enumerate().map(|(index, _)| {
+        let index = index as u8;
+        quote! { #index }
+    });
 
     quote! {
         // DESIGN-DECISION-REVIEW (designer/323 §8.3): per-variant
@@ -436,18 +440,43 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
                 <#contract as ::signal_frame::WireContract>::BINDING
                     .validate_header(short_header)
                     .map_err(|error| <Self::Error as ::core::convert::From<::signal_frame::FrameError>>::from(error))?;
-                let expected = short_header.route().root().value();
+                let actual_route = short_header.route();
                 let Some(expected_kind) = #request_name::kind_from_short_header(short_header) else {
+                    if actual_route.variant().value() != 0 {
+                        let known_root = match actual_route.root().value() {
+                            #( #known_root_arms => true, )*
+                            _ => false,
+                        };
+                        if known_root {
+                            return Err(::signal_frame::OperationDispatchError::UnknownOperationVariant {
+                                root: actual_route.root().value(),
+                                variant: actual_route.variant().value(),
+                            }
+                            .into());
+                        }
+                    }
                     return Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
-                        root: expected,
+                        root: actual_route.root().value(),
                     }
                     .into());
                 };
                 let actual_kind = operation.kind();
                 if actual_kind != expected_kind {
                     return Err(::signal_frame::OperationDispatchError::HeaderOperationMismatch {
-                        expected,
+                        expected: actual_route.root().value(),
                         actual: actual_kind as u8,
+                    }
+                    .into());
+                }
+                let expected_route = ::signal_frame::WireRoute::try_from_log_variant(
+                        <#request_name as ::signal_frame::LogVariant>::log_variant(&operation),
+                    )
+                    .map_err(::signal_frame::FrameError::from)
+                    .map_err(|error| <Self::Error as ::core::convert::From<::signal_frame::FrameError>>::from(error))?;
+                if expected_route != actual_route {
+                    return Err(::signal_frame::OperationDispatchError::HeaderRouteMismatch {
+                        expected: expected_route,
+                        actual: actual_route,
                     }
                     .into());
                 }
@@ -496,7 +525,7 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
     let header_arms = block.variants.iter().enumerate().map(|(index, v)| {
         let index = index as u8;
         let variant = &v.variant_name;
-        quote! { #index => Some(#kind_name::#variant) }
+        quote! { (#index, 0) => Some(#kind_name::#variant) }
     });
     quote! {
         #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
@@ -525,7 +554,10 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
             pub fn kind_from_short_header(
                 short_header: ::signal_frame::ShortHeader,
             ) -> Option<#kind_name> {
-                match short_header.route().root().value() {
+                match (
+                    short_header.route().root().value(),
+                    short_header.route().variant().value(),
+                ) {
                     #( #header_arms, )*
                     _ => None,
                 }

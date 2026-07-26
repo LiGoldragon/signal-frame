@@ -254,8 +254,8 @@ flowchart LR
         tier_one_node["Bound short header<br/>contract u32 + revision u16<br/>variant u8 + root u8"]
     end
 
-    subgraph tier_two [Tier 2 — 64-byte summary 512 bits]
-        tier_two_node["LogSummary projection<br/>hand-impl when natural<br/>public key, identity, short string + context"]
+    subgraph tier_two [Tier 2 — reserved in 0.4]
+        tier_two_node["No summary projection"]
     end
 
     subgraph tier_three [Tier 3 — Full rkyv record]
@@ -272,17 +272,14 @@ Three audiences need three fidelities:
 - **Tier 1** — log writers, hot indexers, dashboard histograms,
   `persona-introspect` aggregation. 8 bytes per event scales to
   ~134 million events per gigabyte. Tag-only — no payload.
-- **Tier 2** — auditors, slow dashboards, observers that need to
-  follow the story without the full payload. 64 bytes fits one
-  Ed25519 public key (32 bytes) plus 32 bytes of typed context, or
-  one BLS12-381 G1 compressed point (48 bytes) plus identity tags.
+- **Tier 2** — reserved in the current 0.4 contract. There is no
+  summary type or summary subscription surface in this crate.
 - **Tier 3** — replay, full semantic consumers (Mind, router,
   downstream daemons). The existing rkyv record.
 
-The discipline: **Tier 1 is mandatory and autogen; Tier 2 is opt-in
-hand-impl when a semantic summary exists; Tier 3 is the existing
-record.** Producers emit each tier on demand based on per-tier
-subscriber count.
+The current 0.4 discipline is **Tier 1 route metadata plus Tier 3
+full records**. Tier 1 is generated from `LogVariant`; Tier 2 is not
+implemented, and Tier 3 is the existing rkyv record.
 
 ### 5.2 · The bound short-header structure (Tier 1 shape)
 
@@ -328,83 +325,50 @@ There is no unbound producer envelope, raw header constructor, or legacy
 encoder. Migration consumers must move to an allocated `WireContract`
 binding before producing frames.
 
-### 5.6 · Tier 2 — extended 64-byte / 512-bit identity-bearing tier
+### 5.6 · Tier 2 reservation
 
-Per Spirit record 273, Tier 2 carries payloads needing **public
-keys, identities, or larger structured data**. The canonical use
-case: a Criome authorization payload carrying quorum public keys
-plus a signature. The tier sits between Tier 1 (root verb plus
-packed sub-variants) and Tier 3 (full unrestricted rkyv), and
-**lets authoritative identity ride with a log entry without
-dropping into Tier 3.**
+The 0.4 wire contract has no Tier 2 summary projection or summary
+subscription. Identity-bearing payloads use
+the ordinary full rkyv record until a later contract version defines a
+separate typed projection.
 
-64-byte budget supports:
-
-| Shape | Fit |
-|---|---|
-| Ed25519 public key (32) + typed context (32) | exact |
-| BLS12-381 G1 compressed point (48) + metadata (16) | exact |
-| SHA-256 / Blake3 hash (32) + other context (32) | exact |
-| Short string up to ~60 bytes + length prefix | exact |
-| Eight `u64`s | exact |
-| Two `ContractVersion` (32 each) | exact |
-| `ComponentName` + `Version` + a couple of enum tags | natural for meta-signal-version-handover summaries |
-
-The `LogSummary` trait carries a const-generic compile-time size
-check (`size_of::<Self::Summary>() <= 64`). Over-budget summaries
-fail to compile, not at runtime.
-
-### 5.7 · Three subscription tiers — `observable` block extension
+### 5.7 · Observable stream
 
 The mandatory observable surface (`Tap(<FilterType>)` / `Untap`
-injected by the macro per the three-layer model affirmed
-2026-05-20) extends to expose **three subscription tiers** rather
-than one full-record stream:
+injected by the macro) exposes one typed `ObserverStream` of full
+records. The current contract does not emit separate Tier 1, Tier 2,
+and Tier 3 subscription streams:
 
 ```mermaid
 flowchart LR
     observable_channel["observable channel<br/>per-contract"]
-    observable_channel --> sub_one["Subscribe Tier 1<br/>u64 verb-namespace stream"]
-    observable_channel --> sub_two["Subscribe Tier 2<br/>64-byte summary stream"]
-    observable_channel --> sub_three["Subscribe Tier 3<br/>full record stream"]
+    observable_channel --> sub_three["ObserverStream<br/>full record stream"]
 
-    sub_one --> aud_log["log writer<br/>~M events/sec"]
-    sub_one --> aud_idx["hot indexer<br/>per-verb counters"]
-    sub_two --> aud_dash["dashboard<br/>audit summaries"]
-    sub_two --> aud_introspect["persona-introspect<br/>cross-component aggregation"]
     sub_three --> aud_replay["replay<br/>reconstruction"]
     sub_three --> aud_mind["Mind<br/>full semantic intake"]
 ```
 
-Producer cost: one projection per active tier. Most channels will
-in practice have Tier 1 + Tier 3 subscribers; Tier 2 is opt-in
-where it adds enough fidelity to justify a hand-implemented
-summary. The runtime tracks per-tier subscriber count and emits
-each tier on demand — subscribers that pay only for Tier 1 do not
-force the producer to project Tier 2.
+The observer set tracks typed subscriptions and publishes the two
+contract-declared event records through this one stream.
 
-### 5.8 · Storage efficiency at observer side
+### 5.8 · Observer-side storage
 
-Persona-introspect (or any observer with persistence) materializes
-three storage tiers from the three subscription tiers, with roughly
-8x cost ratio between adjacent tiers:
+Observers persist the typed `ObserverStream` records according to
+their own retention policy. Storage tiers are outside this crate's
+0.4 wire contract:
 
-| Tier | Size | Per GB | Retention |
+| Stream | Typed full record | Observer-defined | Observer-defined |
 |---|---|---|---|
-| Tier 1 hot | 8 bytes | ~134M events | indefinite (cheap) |
-| Tier 2 warm | 64 bytes | ~16M summaries | 30-90 days |
-| Tier 3 cold | variable rkyv | ~5M records (typical) | per-record TTL |
+| ObserverStream | variable rkyv | observer-defined | observer-defined |
 
-Tier 1 fits comfortably in a single SSD write stream at 1M
-events/sec; Tier 3 needs batching + compression to keep up at
-sustained rates. Tier 1 indexes can group first by contract and
-revision, then by the high-byte route without archive decoding.
+The short header can index records by contract, revision, and complete
+route before archive decoding.
 
 ### 5.9 · What this section owns vs delegates
 
 `signal-frame` owns the primitive binding and route types, exact
 short-header packing and validation, the `WireContract` seam,
-`LogVariant` and `LogSummary`, and the frame envelopes. The macro
+`LogVariant` and generated operation route checks, and the frame envelopes. The macro
 implementation lives in sibling `signal-frame-macros`.
 
 `signal-frame` does NOT own:
@@ -425,8 +389,7 @@ implementation lives in sibling `signal-frame-macros`.
   derive macro).
 - Contract-ID allocation constants belong in the workspace registry
   owner and are intentionally absent from this crate.
-- Contract crates may adopt the bound wrappers directly while older
-  consumers migrate to the bound envelopes.
+- Contract crates use the bound wrappers directly in the 0.4 API.
 
 ## 6 · Migration history — from signal-core to signal-frame
 
@@ -512,10 +475,12 @@ macros/               sibling proc-macro crate
 
 ## Schema Generation Boundary
 
-`signal-frame` is the wire kernel. It owns `Frame`, `ShortHeader`,
-`Caller`, request/reply mechanics, and the streaming subscription
-envelope. Schema-generated component contracts consume these kernel
-types from generated Rust emitted by `schema-rust`.
+`signal-frame` is the wire kernel. It owns `BoundExchangeFrame`,
+`BoundStreamingFrame`, `ShortHeader`, `Caller`, request/reply
+mechanics, and the streaming subscription envelope. Schema-generated
+component contracts consume these kernel types from generated Rust
+emitted by `schema-rust`; each generated channel may provide its own
+`Frame` alias.
 
 Schema generation does not live in this repo. The retired local
 `schema-rust` composer and `emit_schema!` proc-macro path have been
