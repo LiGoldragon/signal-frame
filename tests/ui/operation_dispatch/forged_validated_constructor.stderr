@@ -1,0 +1,5 @@
+error[E0451]: field `operation` of struct `ValidatedOperation` is private
+  --> tests/ui/operation_dispatch/forged_validated_constructor.rs:56:43
+   |
+56 |     let _ = message::ValidatedOperation { operation };
+   |                                           ^^^^^^^^^ private field

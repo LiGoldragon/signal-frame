@@ -378,64 +378,81 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
     let contract = &spec.contract;
     let request_name = &request.name;
     let reply_name = &reply.name;
+    let request_kind_name = format_ident!("{}Kind", request_name);
+    let validated_operation_name = format_ident!("Validated{}", request_name);
     let handler_trait_name = format_ident!("{}Handler", request_name);
     let dispatch_trait_name = format_ident!("{}Dispatch", request_name);
 
-    let handler_methods = request.variants.iter().map(|variant| {
-        let variant_name = &variant.variant_name;
-        let payload_type = &variant.payload_type;
-        let method_name = format_ident!("handle_{}", to_snake_case(&variant_name.to_string()));
-        quote! {
-            async fn #method_name(
-                &mut self,
-                payload: #payload_type,
-            ) -> ::std::result::Result<#reply_name, Self::Error>;
-        }
-    });
-
-    let dispatch_arms = request.variants.iter().map(|variant| {
-        let variant_name = &variant.variant_name;
-        let method_name = format_ident!("handle_{}", to_snake_case(&variant_name.to_string()));
-        quote! {
-            #request_name::#variant_name(payload) => self.#method_name(payload).await
-        }
-    });
-
     quote! {
-        // DESIGN-DECISION-REVIEW (designer/323 §8.3): per-variant
-        // async handler trait. Alternative: one monolithic handler
-        // method or sync handlers. The MVP uses async because the
-        // first consumer is a Kameo/Tokio daemon.
+        /// Operation capability produced only after generated wire validation.
+        pub struct #validated_operation_name {
+            operation: #request_name,
+        }
+
+        impl #validated_operation_name {
+            /// Borrow the operation after dispatch validation.
+            pub fn as_operation(&self) -> &#request_name {
+                &self.operation
+            }
+
+            /// Consume the capability wrapper and recover the typed operation.
+            pub fn into_operation(self) -> #request_name {
+                self.operation
+            }
+
+            /// Return the operation kind after dispatch validation.
+            pub fn kind(&self) -> #request_kind_name {
+                self.operation.kind()
+            }
+
+            fn from_dispatch(operation: #request_name) -> Self {
+                Self { operation }
+            }
+        }
+
+        // Trusted typed handling accepts only the private-constructor
+        // capability wrapper, never an arbitrary decoded operation.
         #[allow(async_fn_in_trait)]
         pub trait #handler_trait_name {
             type Error;
 
-            #( #handler_methods )*
+            async fn handle_validated(
+                &mut self,
+                operation: #validated_operation_name,
+            ) -> ::std::result::Result<#reply_name, Self::Error>;
         }
 
+        // The sole public wire ingress. It validates binding, the complete
+        // route, and archive/body header equality before trusted handling.
         #[allow(async_fn_in_trait)]
         pub trait #dispatch_trait_name: #handler_trait_name
         where
             Self::Error: From<::signal_frame::OperationDispatchError>
                 + From<::signal_frame::FrameError>,
         {
-            async fn dispatch_operation(
-                &mut self,
-                operation: #request_name,
-            ) -> ::std::result::Result<#reply_name, Self::Error> {
-                match operation {
-                    #( #dispatch_arms, )*
-                }
-            }
-
             async fn dispatch(
                 &mut self,
-                short_header: ::signal_frame::ShortHeader,
-                operation: #request_name,
+                frame: Frame,
             ) -> ::std::result::Result<#reply_name, Self::Error> {
+                let short_header = frame.short_header();
                 <#contract as ::signal_frame::WireContract>::BINDING
                     .validate_header(short_header)
                     .map_err(|error| <Self::Error as ::core::convert::From<::signal_frame::FrameError>>::from(error))?;
+
+                let request = match frame.into_body() {
+                    FrameBody::Request { request, .. } => request,
+                    _ => {
+                        return Err(::signal_frame::OperationDispatchError::UnexpectedFrameBody.into());
+                    }
+                };
+                let (operation, tail) = request.payloads.into_head_and_tail();
+                if !tail.is_empty() {
+                    return Err(::signal_frame::OperationDispatchError::MultipleOperations {
+                        count: 1 + tail.len(),
+                    }
+                    .into());
+                }
+
                 let actual_route = short_header.route();
                 let expected_kind = #request_name::route_kind_from_short_header(short_header)
                     .map_err(<Self::Error as ::core::convert::From<::signal_frame::OperationDispatchError>>::from)?;
@@ -459,7 +476,8 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
                     }
                     .into());
                 }
-                self.dispatch_operation(operation).await
+                self.handle_validated(#validated_operation_name::from_dispatch(operation))
+                    .await
             }
         }
 
@@ -473,23 +491,6 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
     }
 }
 
-fn to_snake_case(name: &str) -> String {
-    let mut output = String::new();
-    for (index, character) in name.chars().enumerate() {
-        if character.is_uppercase() {
-            if index > 0 {
-                output.push('_');
-            }
-            for lower in character.to_lowercase() {
-                output.push(lower);
-            }
-        } else {
-            output.push(character);
-        }
-    }
-    output
-}
-
 fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
     let name = &block.name;
     let kind_name = format_ident!("{}Kind", name);
@@ -500,11 +501,6 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
     let arms = block.variants.iter().map(|v| {
         let variant = &v.variant_name;
         quote! { Self::#variant(_) => #kind_name::#variant }
-    });
-    let header_arms = block.variants.iter().enumerate().map(|(index, v)| {
-        let index = index as u8;
-        let variant = &v.variant_name;
-        quote! { (#index, 0) => Some(#kind_name::#variant) }
     });
     let route_arms = block.variants.iter().enumerate().map(|(index, v)| {
         let index = index as u8;
@@ -541,19 +537,7 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
                 }
             }
 
-            pub fn kind_from_short_header(
-                short_header: ::signal_frame::ShortHeader,
-            ) -> Option<#kind_name> {
-                match (
-                    short_header.route().root().value(),
-                    short_header.route().variant().value(),
-                ) {
-                    #( #header_arms, )*
-                    _ => None,
-                }
-            }
-
-            pub fn route_kind_from_short_header(
+            fn route_kind_from_short_header(
                 short_header: ::signal_frame::ShortHeader,
             ) -> ::core::result::Result<
                 #kind_name,

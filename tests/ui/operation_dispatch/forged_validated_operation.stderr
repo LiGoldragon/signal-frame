@@ -1,0 +1,22 @@
+error[E0308]: mismatched types
+  --> tests/ui/operation_dispatch/forged_validated_operation.rs:72:38
+   |
+72 |     let _ = handler.handle_validated(operation);
+   |                     ---------------- ^^^^^^^^^ expected `ValidatedOperation`, found `Operation`
+   |                     |
+   |                     arguments to this method are incorrect
+   |
+note: method defined here
+  --> tests/ui/operation_dispatch/forged_validated_operation.rs:44:5
+   |
+44 | /     signal_channel! {
+45 | |         channel Message contract TestContract {
+46 | |             operation Submit(Submission),
+...  |
+51 | |     }
+   | |_____^
+   = note: this error originates in the macro `signal_channel` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: try wrapping the expression in `message::ValidatedOperation` (its field is private, but it's local to this crate and its privacy can be changed)
+   |
+72 |     let _ = handler.handle_validated(message::ValidatedOperation { operation: operation });
+   |                                      ++++++++++++++++++++++++++++++++++++++++           +

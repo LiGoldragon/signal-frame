@@ -11,4 +11,6 @@ fn channel_macro_rejects_invalid_contract_local_shapes() {
     tests.compile_fail("tests/ui/channel_macro/old_verb_tagged_shape.rs");
     tests.compile_fail("tests/ui/channel_macro/orphan_stream.rs");
     tests.compile_fail("tests/ui/channel_macro/reverse_belongs_mismatch.rs");
+    tests.compile_fail("tests/ui/operation_dispatch/forged_validated_operation.rs");
+    tests.compile_fail("tests/ui/operation_dispatch/forged_validated_constructor.rs");
 }

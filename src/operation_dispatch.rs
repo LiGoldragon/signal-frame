@@ -2,6 +2,10 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum OperationDispatchError {
+    #[error("operation dispatch requires a request frame body")]
+    UnexpectedFrameBody,
+    #[error("operation dispatch accepts exactly one operation, found {count}")]
+    MultipleOperations { count: usize },
     #[error("unknown operation root byte {root}")]
     UnknownOperationRoot { root: u8 },
     #[error("unknown operation route variant {variant} for root {root}")]

@@ -310,8 +310,15 @@ Its low byte maps to `RootCode` and its next byte maps to
 `VariantCode`; `ShortHeader` places those values in the high sixteen
 bits. The remaining header bits are never route vocabulary.
 
-Generated dispatch reads the typed route accessors. A root or variant
-has meaning only after the contract binding has been validated.
+Generated wire ingress is the single `OperationDispatch::dispatch(frame)`
+method. It validates the contract binding, classifies the complete root and
+variant route, and checks that the request body route equals the archive's
+short-header route before handing the operation to the handler. The handler
+receives a generated `ValidatedOperation` capability with a private field and
+constructor; its `as_operation` / `into_operation` accessors expose trusted
+typed handling without allowing downstream code to manufacture the capability
+from an arbitrary decoded operation. There is no public `Option` route
+classifier or separate decoded-operation dispatch bypass.
 
 ### 5.4 · Bound frame surfaces
 

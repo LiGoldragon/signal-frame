@@ -4,9 +4,8 @@ use nota::{NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ContractBinding, ContractId, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence,
-    NonEmpty, ObservableSet, RequestPayload, RootCode, SessionEpoch, ShortHeader,
-    StreamingFrameBody, SubReply, VariantCode, WireContract, WireRevision, WireRoute,
-    signal_channel,
+    NonEmpty, ObservableSet, RequestPayload, RootCode, SessionEpoch, StreamingFrameBody, SubReply,
+    VariantCode, WireContract, WireRevision, WireRoute, signal_channel,
 };
 use std::num::{NonZeroU16, NonZeroU32};
 
@@ -17,18 +16,6 @@ impl WireContract for TestContract {
         ContractId::new(NonZeroU32::MIN),
         WireRevision::new(NonZeroU16::MIN),
     );
-}
-
-fn bound_header(root: u8) -> ShortHeader {
-    bound_header_with_route(root, 0)
-}
-
-fn bound_header_with_route(root: u8, variant: u8) -> ShortHeader {
-    message::Frame::new(
-        WireRoute::new(RootCode::new(root), VariantCode::new(variant)),
-        ExchangeFrameBody::HandshakeRequest(signal_frame::HandshakeRequest::current()),
-    )
-    .short_header()
 }
 
 #[derive(
@@ -168,15 +155,31 @@ struct MessageHandler {
 impl message::OperationHandler for MessageHandler {
     type Error = MessageDispatchError;
 
-    async fn handle_submit(&mut self, _payload: Submission) -> Result<MessageReply, Self::Error> {
-        self.handled.push(MessageOperationKind::Submit);
-        Ok(MessageReply::Accepted(Receipt { accepted: true }))
+    async fn handle_validated(
+        &mut self,
+        operation: message::ValidatedOperation,
+    ) -> Result<MessageReply, Self::Error> {
+        match operation.into_operation() {
+            MessageOperation::Submit(_) => {
+                self.handled.push(MessageOperationKind::Submit);
+                Ok(MessageReply::Accepted(Receipt { accepted: true }))
+            }
+            MessageOperation::Query(_) => {
+                self.handled.push(MessageOperationKind::Query);
+                Ok(MessageReply::Inbox(Inbox { count: 1 }))
+            }
+        }
     }
+}
 
-    async fn handle_query(&mut self, _payload: InboxQuery) -> Result<MessageReply, Self::Error> {
-        self.handled.push(MessageOperationKind::Query);
-        Ok(MessageReply::Inbox(Inbox { count: 1 }))
-    }
+fn request_frame(route: WireRoute, operation: MessageOperation) -> MessageFrame {
+    MessageFrame::new(
+        route,
+        ExchangeFrameBody::Request {
+            exchange: fresh_exchange(),
+            request: operation.into_request(),
+        },
+    )
 }
 
 #[test]
@@ -271,22 +274,6 @@ fn macro_emits_log_variant_for_operation_short_headers() {
         query.into_request().route().unwrap(),
         WireRoute::new(RootCode::new(1), VariantCode::new(0))
     );
-    assert_eq!(
-        MessageOperation::kind_from_short_header(bound_header(1)),
-        Some(MessageOperationKind::Query)
-    );
-    assert_eq!(
-        MessageOperation::kind_from_short_header(bound_header(99)),
-        None
-    );
-    assert_eq!(
-        MessageOperation::kind_from_short_header(bound_header_with_route(0, 1)),
-        None
-    );
-    assert_eq!(
-        MessageOperation::kind_from_short_header(bound_header_with_route(1, 1)),
-        None
-    );
 }
 
 #[test]
@@ -295,19 +282,19 @@ fn macro_emits_operation_dispatch_handler_surface() {
 
     let mut handler = MessageHandler::default();
 
-    let reply = block_on_ready(handler.dispatch(
-        bound_header(0),
+    let reply = block_on_ready(handler.dispatch(request_frame(
+        WireRoute::new(RootCode::new(0), VariantCode::new(0)),
         MessageOperation::Submit(Submission::new("hello")),
-    ))
+    )))
     .expect("dispatch");
 
     assert_eq!(handler.handled, vec![MessageOperationKind::Submit]);
     assert_eq!(reply, MessageReply::Accepted(Receipt { accepted: true }));
 
-    let mismatch = block_on_ready(handler.dispatch(
-        bound_header(1),
+    let mismatch = block_on_ready(handler.dispatch(request_frame(
+        WireRoute::new(RootCode::new(1), VariantCode::new(0)),
         MessageOperation::Submit(Submission::new("wrong header")),
-    ))
+    )))
     .expect_err("mismatched short header is rejected");
     assert!(matches!(
         mismatch,
@@ -319,10 +306,10 @@ fn macro_emits_operation_dispatch_handler_surface() {
         )
     ));
 
-    let unknown = block_on_ready(handler.dispatch(
-        bound_header(99),
+    let unknown = block_on_ready(handler.dispatch(request_frame(
+        WireRoute::new(RootCode::new(99), VariantCode::new(0)),
         MessageOperation::Submit(Submission::new("unknown header")),
-    ))
+    )))
     .expect_err("unknown short header is rejected");
     assert!(matches!(
         unknown,
@@ -337,10 +324,10 @@ fn operation_dispatch_rejects_forged_variant_before_handler() {
     use message::OperationDispatch;
 
     let mut handler = MessageHandler::default();
-    let forged = block_on_ready(handler.dispatch(
-        bound_header_with_route(0, 9),
+    let forged = block_on_ready(handler.dispatch(request_frame(
+        WireRoute::new(RootCode::new(0), VariantCode::new(9)),
         MessageOperation::Submit(Submission::new("forged route")),
-    ))
+    )))
     .expect_err("nonzero route variant is rejected before dispatch");
 
     assert!(matches!(
@@ -353,6 +340,13 @@ fn operation_dispatch_rejects_forged_variant_before_handler() {
         )
     ));
     assert!(handler.handled.is_empty(), "forged route reached handler");
+}
+
+#[test]
+fn generated_surface_has_no_option_route_classifier() {
+    let source = include_str!("../macros/src/emit.rs");
+    assert!(!source.contains("pub fn kind_from_short_header"));
+    assert!(!source.contains("Option<#kind_name>"));
 }
 
 #[test]

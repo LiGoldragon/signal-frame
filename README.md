@@ -32,6 +32,13 @@ removed. Consumers must implement `WireContract` and use
 `Request::route` and macro-generated `Operation::into_frame` are fallible
 because route values with bits above the low sixteen are rejected.
 
+Generated operation handling has one wire ingress: `OperationDispatch::dispatch`
+accepts the bound frame, validates its binding and complete route, and checks
+archive/body header equality. Only then does it invoke the handler with the
+private-constructor `ValidatedOperation` capability. Handlers can inspect or
+consume that trusted typed operation through its accessors; arbitrary decoded
+operations cannot call the handler directly.
+
 `signal-frame` is the renamed successor to the former `signal-core`
 crate. The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
 `Subscribe`, `Validate`) — which lived in `signal-core` — have moved
