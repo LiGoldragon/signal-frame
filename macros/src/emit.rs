@@ -427,7 +427,7 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
                 short_header: ::signal_frame::ShortHeader,
                 operation: #request_name,
             ) -> ::std::result::Result<#reply_name, Self::Error> {
-                let expected = short_header.to_le_bytes()[0];
+                let expected = short_header.route().root().value();
                 let Some(expected_kind) = #request_name::kind_from_short_header(short_header) else {
                     return Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
                         root: expected,
@@ -515,7 +515,7 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
             pub fn kind_from_short_header(
                 short_header: ::signal_frame::ShortHeader,
             ) -> Option<#kind_name> {
-                match short_header.to_le_bytes()[0] {
+                match short_header.route().root().value() {
                     #( #header_arms, )*
                     _ => None,
                 }

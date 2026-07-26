@@ -19,6 +19,7 @@
 //! `signal_cli!` emits thin component CLI binaries over the shared frame
 //! client path.
 
+pub mod binding;
 pub mod caller;
 #[cfg(feature = "nota-text")]
 pub mod command_line;
@@ -37,6 +38,10 @@ pub mod request;
 pub mod subscription;
 pub mod version;
 
+pub use binding::{
+    BindingIdentifierError, ContractBinding, ContractId, RootCode, VariantCode, WireContract,
+    WireRevision, WireRoute,
+};
 pub use caller::{Caller, CallerIdentity, ExecutablePath, ProcessIdentifier, ProcessStartTime};
 #[cfg(feature = "nota-text")]
 pub use command_line::{
@@ -50,8 +55,9 @@ pub use exchange::{
     StreamEventIdentifier,
 };
 pub use frame::{
-    ExchangeFrame, ExchangeFrameBody, SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrame,
-    StreamingFrameBody, short_header_from_archive, short_header_from_length_prefixed,
+    BoundExchangeFrame, BoundStreamingFrame, ExchangeFrame, ExchangeFrameBody,
+    SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrame, StreamingFrameBody,
+    short_header_from_archive, short_header_from_length_prefixed,
 };
 pub use identity::{Revision, Slot};
 pub use log_variant::LogVariant;

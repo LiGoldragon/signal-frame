@@ -13,6 +13,15 @@ daemon, one NOTA reply out. Domain records and contract-local operation
 roots live in the per-component contract crates that depend on this
 one.
 
+Every production frame can use the contract-bound envelope seam. Its
+eight-byte short header packs `ContractId(u32)`, `WireRevision(u16)`,
+`VariantCode(u8)`, and `RootCode(u8)` in that bit order. Contract crates
+implement `WireContract`; bound constructors derive the binding for
+request, reply, handshake/control, and subscription-event frames, and
+bound decoders reject legacy zero, wrong-contract, and wrong-revision
+headers before archive decoding. Allocation constants and registry
+enumerations do not live in this generic crate.
+
 `signal-frame` is the renamed successor to the former `signal-core`
 crate. The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
 `Subscribe`, `Validate`) — which lived in `signal-core` — have moved

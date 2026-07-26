@@ -1,0 +1,10 @@
+error[E0624]: associated function `legacy_unbound` is private
+ --> tests/ui/wire_binding/unbound_contract.rs:6:55
+  |
+6 |     const BINDING: ContractBinding = ContractBinding::legacy_unbound();
+  |                                                       ^^^^^^^^^^^^^^ private associated function
+  |
+ ::: src/binding.rs
+  |
+  |     pub(crate) const fn legacy_unbound() -> Self {
+  |     -------------------------------------------- private associated function defined here

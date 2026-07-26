@@ -62,9 +62,12 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   uninhabited event arm to discharge) and makes the schema honestly
   reflect which channels emit pushed events.
 - `ShortHeader` — the mandatory 64-bit Tier 1 prefix at the front of
-  every frame archive. `Frame::new(body)` creates an empty short
-  header for compatibility; projection-aware constructors use
-  `Frame::with_short_header(short_header, body)`.
+  every frame archive. Its low 48 bits bind the archive to a contract
+  and wire revision; its high 16 bits carry the contract-local route.
+  `BoundExchangeFrame<C, ..>` and `BoundStreamingFrame<C, ..>` derive
+  production bindings from `C: WireContract`. The unbound `Frame`
+  constructors remain only as compatibility surfaces for legacy
+  consumers.
 - The `ShortHeader` prefix that schema-generated route projections
   consume. Richer schema-defined header surfaces are emitted by
   `schema-rust` in component crates; this kernel owns only the
@@ -248,7 +251,7 @@ flowchart LR
     signal_type["A Signal type<br/>(Operation, Reply, Event, EffectOutcome)"]
 
     subgraph tier_one [Tier 1 — short header 8 bytes]
-        tier_one_node["LogVariant projection<br/>autogen via signal_channel macro<br/>byte 0 root verb + bytes 1-7 sub-variants"]
+        tier_one_node["Bound short header<br/>contract u32 + revision u16<br/>variant u8 + root u8"]
     end
 
     subgraph tier_two [Tier 2 — 64-byte summary 512 bits]
@@ -281,150 +284,50 @@ hand-impl when a semantic summary exists; Tier 3 is the existing
 record.** Producers emit each tier on demand based on per-tier
 subscriber count.
 
-### 5.2 · The short-header verb-namespace structure (Tier 1 shape)
+### 5.2 · The bound short-header structure (Tier 1 shape)
 
-Tier 1 is not a free-form 64-bit field — it carries a standardized
-verb namespace. **One byte 0 root verb plus seven bytes 1-7
-sub-variants, eight enums total, packed into a `u64`.** The root
-verb is the "beingness" of the signal type — its most universal
-quality. Sub-variants are data-carrying classifications attached to
-the verb namespace.
+The short header remains exactly eight little-endian bytes immediately
+after the four-byte big-endian length prefix and before the archived
+frame body:
 
-Per Spirit records 388-392, the canonical name of this 64-bit prefix
-is **short header**. The MVP shape is deliberately simple: one root
-enum plus seven sub-enums, one full byte each. Both `ExchangeFrame`
-and `StreamingFrame` encode the short header immediately after the
-length prefix and before the archived frame body, so length-prefixed
-socket readers can inspect bytes `4..12` without deserializing the
-full frame body. The length prefix remains big-endian `u32`; the
-short header uses little-endian `u64` bytes to match the workspace
-rkyv pin.
-
-```mermaid
-flowchart LR
-    byte_zero["byte 0<br/>ROOT VERB<br/>beingness"]
-    byte_one["byte 1<br/>sub-variant 1"]
-    byte_two["byte 2<br/>sub-variant 2"]
-    byte_three["byte 3<br/>sub-variant 3"]
-    byte_four["byte 4<br/>sub-variant 4"]
-    byte_five["byte 5<br/>sub-variant 5"]
-    byte_six["byte 6<br/>sub-variant 6"]
-    byte_seven["byte 7<br/>sub-variant 7"]
-
-    byte_zero --- byte_one --- byte_two --- byte_three --- byte_four --- byte_five --- byte_six --- byte_seven
-
-    style byte_zero fill:#fef
-```
-
-**Why verbs at the root.** Verbs are the most universal quality of
-a signal type — putting them at byte 0 (LSB) lets the daemon
-classify and dispatch on the root operation kind cheaply via a
-single byte read. Within a single channel, byte-0 histograms give
-the channel's root-verb distribution in a linear scan.
-
-**The byte-0 namespace is per-component, not workspace-wide.** Each
-contract crate (each channel) declares its OWN root verb enum local
-to that channel. Same byte value on different channels means
-different verbs — the decoder reads byte 0 IN THE CONTEXT of which
-channel the byte stream came from (provenance). The consumer always
-knows its subscription channel; provenance is implicit at the
-subscription boundary. Per spirit record 326 (correction superseding
-the shared-workspace-enum framing this section originally carried)
-and detailed in `reports/designer/305-v2-design-64bit-signal-per-component-namespacing.md`.
-
-**Byte-0 split between meta and ordinary contracts** (per spirit
-record 327, under detailed design): for a component triad, the
-ordinary `signal-<comp>` contract and the meta `meta-signal-<comp>`
-contract each claim a SECTION of the 256-variant byte-0 space,
-divided at the golden ratio (~0.39 / 0.61). The macro enforces
-compile-time agreement between the two contracts (both must agree
-on which side is the small section and which is the big — if both
-claim the same side, compilation fails). Default: meta contract
-takes the small section, ordinary contract takes the big. The split
-opens the potential for single-socket-per-component dispatch where
-the byte-0 section IS the meta-vs-ordinary discriminator (Medium
-certainty exploration). Detailed mechanism lands in
-`reports/designer/307-design-golden-ratio-namespace-split.md` once
-that design completes.
-
-**Cross-channel verb aggregation** is semantic, not byte-level.
-"How many Record-shaped operations across the workspace today?"
-requires the rollup-er to know which channel's byte-X means "Record"
-on that channel — the same byte value on another channel may mean
-something entirely different. The per-component namespacing
-prevents cross-channel byte conflation and makes per-channel
-indexing maximally efficient — both desired outcomes.
-
-**Eight enums per type:** one root verb enum + seven sub-variant
-enums, all local to the channel. The sub-variant enums are
-namespace-specific (each component contract declares its own
-seven), and bytes 1-7 always carry sub-variant classifications,
-never raw payload data. Universal data variants (per §5.3) are
-inherited by every channel's slot enums.
-
-### 5.3 · Universal data variants — shared sub-variant vocabulary
-
-Per Spirit record 272, **every namespace pre-allocates a base set
-of universal data sub-variants**, so all namespaces share a common
-primitive vocabulary in bytes 1-7. The current universal set:
-
-| Variant | Width | Use |
+| Bits | Type | Meaning |
 |---|---|---|
-| `U8` | 1 byte | generic small counter, sub-tag, qualitative magnitude |
-| `U16` | 2 bytes | short identifiers (e.g. Criome 16-bit short ID derived from a public key, with polite-rename-on-collision convention) |
+| 0..31 | `ContractId(u32)` | stable numeric contract identity |
+| 32..47 | `WireRevision(u16)` | accepted archive-body revision |
+| 48..55 | `VariantCode(u8)` | contract-local route variant |
+| 56..63 | `RootCode(u8)` | contract-local route root |
 
-The universal set grows over time as new primitive types prove
-useful across multiple namespaces; the macro grammar reserves an
-inheritance hook so adding a new universal does not force every
-channel to re-emit. The point is that an observer reading a
-cross-component Tier 1 stream sees `U16` carrying the same semantics
-in `signal-spirit`, `signal-criome`, `signal-mind`, etc.
+`ContractId` and `WireRevision` reserve zero. Legacy headers remain
+representable through `ShortHeader::legacy_unbound`, but every
+production-bound decoder rejects them before rkyv is invoked.
 
-### 5.4 · Macro autogen — the decision tree
+The contract and revision are encoded truth, not inferred from socket
+placement, payload shape, names, hashes, or probability. `WireContract`
+binds constructors at the type level. Allocation constants and registry
+enumerations live above this generic kernel.
 
-`signal_channel!` autogen for `LogVariant` walks the type per the
-decision tree below (originally /155 §1.5, refined for the
-verb-namespace structure):
+### 5.3 · Route projection
 
-```mermaid
-flowchart TB
-    start_node["Macro sees a type definition"]
-    enum_check{"Is it a flat enum<br/>with all unit variants?"}
-    data_check{"Is it a data-carrying enum<br/>struct or tuple variants?"}
-    payload_check{"Does every variant payload<br/>itself implement LogVariant?"}
+`LogVariant` continues to project contract-local route information.
+Its low byte maps to `RootCode` and its next byte maps to
+`VariantCode`; `ShortHeader` places those values in the high sixteen
+bits. The remaining header bits are never route vocabulary.
 
-    flat_path["Auto-derive: root verb at byte 0,<br/>upper 7 bytes zero"]
-    nested_path["Auto-derive: root verb at byte 0,<br/>recurse into payload at bytes 1-7"]
-    primitive_path["Auto-derive: root verb at byte 0,<br/>recurse for each field,<br/>bit-pack into bytes 1-7 if fits"]
-    fallback_path["Auto-derive: root verb at byte 0,<br/>upper 56 bits zero,<br/>emit warning suggesting hand impl"]
+Generated dispatch reads the typed route accessors. A root or variant
+has meaning only after the contract binding has been validated.
 
-    start_node --> enum_check
-    enum_check -->|yes| flat_path
-    enum_check -->|no| data_check
-    data_check -->|yes| payload_check
-    payload_check -->|yes| nested_path
-    payload_check -->|no but fields are primitives| primitive_path
-    payload_check -->|no opaque variants| fallback_path
-```
+### 5.4 · Bound and legacy frame surfaces
 
-The root verb discriminator is **always** at byte 0 — invariant of
-the macro. Hand-impl only the projection (e.g. "the first 8 bytes
-of a BLS signature"); never break the byte-0 root-verb rule.
+`BoundExchangeFrame<C, ..>` and `BoundStreamingFrame<C, ..>` are the
+production seam. Their constructors accept a route and body, derive
+`C::BINDING`, and cover handshake/control, request, reply, and
+subscription-event bodies uniformly. Their decoders validate length,
+contract, and revision before archive bytecheck or deserialization.
 
-### 5.5 · How `signal_channel!` plays — variant always at root
-
-Because `signal_channel!`-generated `Operation`, `Reply`, `Effect`,
-and (when observable) the observer event types are all enums at
-the top level, the root-verb invariant is satisfied by macro
-construction. The per-channel `Operation` enum's variant
-discriminator IS the byte-0 root verb for that channel's Tier 1
-stream. Sub-variants in bytes 1-7 are channel-defined.
-
-Internal data records (the structs declared in `signal-<component>`
-crates that ride inside payloads) do not need to reshape into
-top-level enums to participate in Tier 1. They emit a constant
-discriminator (one possible "root verb" for that record family) plus
-packed fields, per the §5.4 decision tree's bottom branches.
+`ExchangeFrame` and `StreamingFrame` remain backward-compatible generic
+envelopes. Their raw and empty-header constructors are legacy
+compatibility APIs; ordinary ingress must not decode them as production
+bound traffic.
 
 ### 5.6 · Tier 2 — extended 64-byte / 512-bit identity-bearing tier
 
@@ -495,27 +398,24 @@ three storage tiers from the three subscription tiers, with roughly
 
 Tier 1 fits comfortably in a single SSD write stream at 1M
 events/sec; Tier 3 needs batching + compression to keep up at
-sustained rates. The verb-namespace structure makes Tier 1 indexes
-particularly efficient — group-by-byte-0 gives the root-verb
-histogram in a single linear scan.
+sustained rates. Tier 1 indexes can group first by contract and
+revision, then by the high-byte route without archive decoding.
 
 ### 5.9 · What this section owns vs delegates
 
-`signal-frame` owns the `LogVariant` and `LogSummary` traits, the
-`signal_channel!` macro autogen logic for Tier 1, the universal
-data sub-variant set, and the three-subscription-tier shape in the
-mandatory observable block. The macro implementation lives in
-sibling `signal-frame-macros`.
+`signal-frame` owns the primitive binding and route types, exact
+short-header packing and validation, the `WireContract` seam,
+`LogVariant` and `LogSummary`, and the frame envelopes. The macro
+implementation lives in sibling `signal-frame-macros`.
 
 `signal-frame` does NOT own:
 
+- Contract-ID allocation and registry enumeration. Allocation constants
+  are supplied by the workspace contract owner, not this generic crate.
 - Per-channel root-verb vocabulary — each `signal-<component>`
   crate names its own operation verbs (`Submit`, `Query`,
-  `Configure`, etc.); the workspace-shared root-verb registry is
-  a separate concern (see §5.10 below).
-- Per-channel sub-variant enums beyond the universal set —
-  contract crates declare seven sub-variant enums per channel as
-  needed.
+  `Configure`, etc.).
+- Per-channel route interpretation.
 - Persisted storage of any tier — observers materialize their own
   storage tiers from the subscription streams.
 
@@ -524,15 +424,10 @@ sibling `signal-frame-macros`.
 - The macro implementation for `LogVariant` autogen tracks under
   bead `primary-l02o` (signal-frame: LogVariant trait + autogen
   derive macro).
-- The specific universal-data-variant set beyond `U8` / `U16` is
-  not yet decided; new primitives land as concrete cross-component
-  needs surface (Spirit record 272 leaves room for "possibly more
-  primitive types").
-- A workspace-wide root-verb registry mechanism is not yet
-  specified — currently each channel's root verbs are namespace-
-  local enum variants. A future cross-namespace vocabulary catalog
-  (so `Tap` always means `Tap` regardless of channel) is a follow-on
-  worth a dedicated bead.
+- Contract-ID allocation constants belong in the workspace registry
+  owner and are intentionally absent from this crate.
+- Contract crates may adopt the bound wrappers directly while older
+  consumers migrate from the generic legacy envelopes.
 
 ## 6 · Migration history — from signal-core to signal-frame
 

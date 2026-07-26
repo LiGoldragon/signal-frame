@@ -4,9 +4,13 @@ use nota::{NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
-    ObservableSet, RequestPayload, SessionEpoch, ShortHeader, StreamingFrame, StreamingFrameBody,
-    SubReply, signal_channel,
+    ObservableSet, RequestPayload, RootCode, SessionEpoch, ShortHeader, StreamingFrame,
+    StreamingFrameBody, SubReply, VariantCode, WireRoute, signal_channel,
 };
+
+fn legacy_route(root: u8) -> ShortHeader {
+    ShortHeader::legacy_unbound(WireRoute::new(RootCode::new(root), VariantCode::new(0)))
+}
 
 #[derive(
     Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
@@ -235,13 +239,13 @@ fn macro_emits_log_variant_for_operation_short_headers() {
 
     assert_eq!(signal_frame::LogVariant::log_variant(&submit), 0);
     assert_eq!(signal_frame::LogVariant::log_variant(&query), 1);
-    assert_eq!(query.into_request().short_header(), ShortHeader::new(1));
+    assert_eq!(query.into_request().short_header(), legacy_route(1));
     assert_eq!(
-        MessageOperation::kind_from_short_header(ShortHeader::new(1)),
+        MessageOperation::kind_from_short_header(legacy_route(1)),
         Some(MessageOperationKind::Query)
     );
     assert_eq!(
-        MessageOperation::kind_from_short_header(ShortHeader::new(99)),
+        MessageOperation::kind_from_short_header(legacy_route(99)),
         None
     );
 }
@@ -253,7 +257,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
     let mut handler = MessageHandler::default();
 
     let reply = block_on_ready(handler.dispatch(
-        ShortHeader::new(0),
+        legacy_route(0),
         MessageOperation::Submit(Submission::new("hello")),
     ))
     .expect("dispatch");
@@ -262,7 +266,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
     assert_eq!(reply, MessageReply::Accepted(Receipt { accepted: true }));
 
     let mismatch = block_on_ready(handler.dispatch(
-        ShortHeader::new(1),
+        legacy_route(1),
         MessageOperation::Submit(Submission::new("wrong header")),
     ))
     .expect_err("mismatched short header is rejected");
@@ -277,7 +281,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
     ));
 
     let unknown = block_on_ready(handler.dispatch(
-        ShortHeader::new(99),
+        legacy_route(99),
         MessageOperation::Submit(Submission::new("unknown header")),
     ))
     .expect_err("unknown short header is rejected");

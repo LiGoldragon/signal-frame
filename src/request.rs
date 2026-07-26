@@ -17,6 +17,7 @@ use nota::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
+use crate::WireRoute;
 use crate::caller::Caller;
 use crate::frame::ShortHeader;
 use crate::log_variant::LogVariant;
@@ -84,7 +85,9 @@ where
     /// dispatch triage key. The full ordered payload sequence remains in
     /// the archived body.
     pub fn short_header(&self) -> ShortHeader {
-        ShortHeader::new(self.payloads.head().log_variant())
+        ShortHeader::legacy_unbound(WireRoute::from_log_variant(
+            self.payloads.head().log_variant(),
+        ))
     }
 }
 
