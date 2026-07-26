@@ -400,10 +400,6 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
             #request_name::#variant_name(payload) => self.#method_name(payload).await
         }
     });
-    let known_root_arms = request.variants.iter().enumerate().map(|(index, _)| {
-        let index = index as u8;
-        quote! { #index }
-    });
 
     quote! {
         // DESIGN-DECISION-REVIEW (designer/323 §8.3): per-variant
@@ -441,25 +437,8 @@ fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
                     .validate_header(short_header)
                     .map_err(|error| <Self::Error as ::core::convert::From<::signal_frame::FrameError>>::from(error))?;
                 let actual_route = short_header.route();
-                let Some(expected_kind) = #request_name::kind_from_short_header(short_header) else {
-                    if actual_route.variant().value() != 0 {
-                        let known_root = match actual_route.root().value() {
-                            #( #known_root_arms => true, )*
-                            _ => false,
-                        };
-                        if known_root {
-                            return Err(::signal_frame::OperationDispatchError::UnknownOperationVariant {
-                                root: actual_route.root().value(),
-                                variant: actual_route.variant().value(),
-                            }
-                            .into());
-                        }
-                    }
-                    return Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
-                        root: actual_route.root().value(),
-                    }
-                    .into());
-                };
+                let expected_kind = #request_name::route_kind_from_short_header(short_header)
+                    .map_err(<Self::Error as ::core::convert::From<::signal_frame::OperationDispatchError>>::from)?;
                 let actual_kind = operation.kind();
                 if actual_kind != expected_kind {
                     return Err(::signal_frame::OperationDispatchError::HeaderOperationMismatch {
@@ -527,6 +506,17 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
         let variant = &v.variant_name;
         quote! { (#index, 0) => Some(#kind_name::#variant) }
     });
+    let route_arms = block.variants.iter().enumerate().map(|(index, v)| {
+        let index = index as u8;
+        let variant = &v.variant_name;
+        quote! {
+            (#index, 0) => Ok(#kind_name::#variant),
+            (#index, variant) => Err(::signal_frame::OperationDispatchError::UnknownOperationVariant {
+                root: #index,
+                variant,
+            }),
+        }
+    });
     quote! {
         #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
         #[derive(
@@ -560,6 +550,23 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
                 ) {
                     #( #header_arms, )*
                     _ => None,
+                }
+            }
+
+            pub fn route_kind_from_short_header(
+                short_header: ::signal_frame::ShortHeader,
+            ) -> ::core::result::Result<
+                #kind_name,
+                ::signal_frame::OperationDispatchError,
+            > {
+                match (
+                    short_header.route().root().value(),
+                    short_header.route().variant().value(),
+                ) {
+                    #( #route_arms )*
+                    _ => Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
+                        root: short_header.route().root().value(),
+                    }),
                 }
             }
         }
