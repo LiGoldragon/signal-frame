@@ -1,0 +1,17 @@
+error[E0599]: no associated function or constant named `default` found for struct `ShortHeader` in the current scope
+ --> tests/ui/wire_binding/unchecked_header.rs:4:26
+  |
+4 |     let _ = ShortHeader::default();
+  |                          ^^^^^^^ associated function or constant not found in `ShortHeader`
+
+error[E0599]: no associated function or constant named `new` found for struct `ShortHeader` in the current scope
+ --> tests/ui/wire_binding/unchecked_header.rs:5:26
+  |
+5 |     let _ = ShortHeader::new(0);
+  |                          ^^^ associated function or constant not found in `ShortHeader`
+  |
+help: there is a method `ne` with a similar name
+  |
+5 -     let _ = ShortHeader::new(0);
+5 +     let _ = ShortHeader::ne(0);
+  |

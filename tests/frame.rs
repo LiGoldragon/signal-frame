@@ -2,14 +2,44 @@
 use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    AcceptedOutcome, BatchErrorClassification, BatchFailureReason, Caller, CallerIdentity,
-    CommitStatus, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError,
-    HandshakeRejectionReason, HandshakeReply, HandshakeRequest, LaneSequence, LegacyExchangeFrame,
-    LegacyStreamingFrame, NonEmpty, OperationFailureReason, ProcessIdentifier, ProtocolVersion,
-    Reply, Request, RequestPayload, RetryClassification, Revision, SessionEpoch, ShortHeader, Slot,
-    StreamEventIdentifier, StreamingFrameBody, SubReply, SubscriptionTokenInner,
+    AcceptedOutcome, BatchErrorClassification, BatchFailureReason, BoundExchangeFrame,
+    BoundStreamingFrame, Caller, CallerIdentity, CommitStatus, ContractBinding, ContractId,
+    ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRejectionReason,
+    HandshakeReply, HandshakeRequest, LaneSequence, NonEmpty, OperationFailureReason,
+    ProcessIdentifier, ProtocolVersion, Reply, Request, RequestPayload, RetryClassification,
+    Revision, RootCode, SessionEpoch, Slot, StreamEventIdentifier, StreamingFrameBody, SubReply,
+    SubscriptionTokenInner, VariantCode, WireContract, WireRevision, WireRoute,
     short_header_from_archive, short_header_from_length_prefixed,
 };
+use std::num::{NonZeroU16, NonZeroU32};
+
+#[derive(Debug)]
+struct TestContract;
+impl WireContract for TestContract {
+    const BINDING: ContractBinding = ContractBinding::new(
+        ContractId::new(NonZeroU32::MIN),
+        WireRevision::new(NonZeroU16::MIN),
+    );
+}
+
+const TEST_ROUTE: WireRoute = WireRoute::new(RootCode::new(7), VariantCode::new(8));
+
+type TestExchangeFrame<RequestPayload, ReplyPayload> =
+    BoundExchangeFrame<TestContract, RequestPayload, ReplyPayload>;
+type TestStreamingFrame<RequestPayload, ReplyPayload, EventPayload> =
+    BoundStreamingFrame<TestContract, RequestPayload, ReplyPayload, EventPayload>;
+
+fn exchange_frame<RequestPayload, ReplyPayload>(
+    body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
+) -> TestExchangeFrame<RequestPayload, ReplyPayload> {
+    TestExchangeFrame::new(TEST_ROUTE, body)
+}
+
+fn streaming_frame<RequestPayload, ReplyPayload, EventPayload>(
+    body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
+) -> TestStreamingFrame<RequestPayload, ReplyPayload, EventPayload> {
+    TestStreamingFrame::new(TEST_ROUTE, body)
+}
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 struct DomainRequest {
@@ -92,15 +122,14 @@ fn fresh_exchange() -> ExchangeIdentifier {
 fn request_frame_round_trips() {
     let exchange = fresh_exchange();
     let request = DomainRequest::new("Node").into_request();
-    let frame =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::new(ExchangeFrameBody::Request {
-            exchange,
-            request: request.clone(),
-        });
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::Request {
+        exchange,
+        request: request.clone(),
+    });
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
 
     match decoded.into_body() {
         ExchangeFrameBody::Request {
@@ -124,15 +153,14 @@ fn request_frame_round_trips_caller_identity() {
         Caller::new(ProcessIdentifier::new(7), None, None)
             .with_identity(Some(CallerIdentity::new("designer"))),
     ));
-    let frame =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::new(ExchangeFrameBody::Request {
-            exchange: fresh_exchange(),
-            request,
-        });
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::Request {
+        exchange: fresh_exchange(),
+        request,
+    });
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
 
     let ExchangeFrameBody::Request { request, .. } = decoded.into_body() else {
         panic!("expected request frame");
@@ -145,40 +173,46 @@ fn request_frame_round_trips_caller_identity() {
 }
 
 #[test]
-fn exchange_frame_defaults_to_empty_short_header() {
-    let frame = LegacyExchangeFrame::<DomainRequest, DomainReply>::new(
-        ExchangeFrameBody::HandshakeRequest(HandshakeRequest::current()),
-    );
+fn exchange_frame_always_has_the_contract_binding() {
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::HandshakeRequest(
+        HandshakeRequest::current(),
+    ));
 
-    assert_eq!(frame.short_header(), ShortHeader::empty());
+    assert_eq!(frame.short_header().binding(), TestContract::BINDING);
 }
 
 #[test]
 fn exchange_frame_short_header_round_trips_and_is_peekable() {
     let exchange = fresh_exchange();
-    let short_header = ShortHeader::new(0x0807_0605_0403_0201);
     let request = DomainRequest::new("Node").into_request();
-    let frame = LegacyExchangeFrame::<DomainRequest, DomainReply>::with_short_header(
-        short_header,
-        ExchangeFrameBody::Request {
-            exchange,
-            request: request.clone(),
-        },
-    );
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::Request {
+        exchange,
+        request: request.clone(),
+    });
+    let short_header = frame.short_header();
 
     let archive = frame.encode().unwrap();
-    assert_eq!(short_header_from_archive(&archive).unwrap(), short_header);
+    assert_eq!(
+        short_header_from_archive(&archive)
+            .unwrap()
+            .validate()
+            .unwrap(),
+        short_header
+    );
     assert_eq!(&archive[..8], &short_header.to_le_bytes());
 
     let bytes = frame.encode_length_prefixed().unwrap();
     assert_eq!(
-        short_header_from_length_prefixed(&bytes).unwrap(),
+        short_header_from_length_prefixed(&bytes)
+            .unwrap()
+            .validate()
+            .unwrap(),
         short_header
     );
     assert_eq!(&bytes[4..12], &short_header.to_le_bytes());
 
     let decoded =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
     assert_eq!(decoded.short_header(), short_header);
     assert_eq!(decoded.body(), frame.body());
 }
@@ -201,13 +235,13 @@ fn request_from_payload_wraps_single_payload() {
 
 #[test]
 fn handshake_request_frame_round_trips_at_frame_layer() {
-    let frame = LegacyExchangeFrame::<DomainRequest, DomainReply>::new(
-        ExchangeFrameBody::HandshakeRequest(HandshakeRequest::current()),
-    );
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::HandshakeRequest(
+        HandshakeRequest::current(),
+    ));
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
 
     match decoded.into_body() {
         ExchangeFrameBody::HandshakeRequest(request) => {
@@ -221,14 +255,13 @@ fn handshake_request_frame_round_trips_at_frame_layer() {
 fn handshake_rejection_frame_round_trips_at_frame_layer() {
     let local = ProtocolVersion::new(0, 1, 0);
     let peer = ProtocolVersion::new(1, 0, 0);
-    let frame =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::new(ExchangeFrameBody::HandshakeReply(
-            HandshakeReply::Rejected(HandshakeRejectionReason::IncompatibleVersion { local, peer }),
-        ));
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::HandshakeReply(
+        HandshakeReply::Rejected(HandshakeRejectionReason::IncompatibleVersion { local, peer }),
+    ));
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
 
     match decoded.into_body() {
         ExchangeFrameBody::HandshakeReply(HandshakeReply::Rejected(
@@ -245,14 +278,14 @@ fn handshake_rejection_frame_round_trips_at_frame_layer() {
 fn reply_frame_round_trips_with_exchange_identifier() {
     let exchange = fresh_exchange();
     let reply = Reply::committed(NonEmpty::single(SubReply::Ok(DomainReply::accepted())));
-    let frame = LegacyExchangeFrame::<DomainRequest, DomainReply>::new(ExchangeFrameBody::Reply {
+    let frame = exchange_frame::<DomainRequest, DomainReply>(ExchangeFrameBody::Reply {
         exchange,
         reply: reply.clone(),
     });
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
 
     match decoded.into_body() {
         ExchangeFrameBody::Reply {
@@ -358,14 +391,14 @@ fn batch_error_classification_projects_wire_safe_metadata() {
 fn typed_slot_and_revision_round_trip_inside_request_frame() {
     let payload = SlotRequest::new(Slot::new(42), Revision::initial());
     let exchange = fresh_exchange();
-    let frame = LegacyExchangeFrame::<SlotRequest, DomainReply>::new(ExchangeFrameBody::Request {
+    let frame = exchange_frame::<SlotRequest, DomainReply>(ExchangeFrameBody::Request {
         exchange,
         request: payload.clone().into_request(),
     });
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyExchangeFrame::<SlotRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
+        TestExchangeFrame::<SlotRequest, DomainReply>::decode_length_prefixed(&bytes).unwrap();
 
     match decoded.into_body() {
         ExchangeFrameBody::Request {
@@ -384,7 +417,7 @@ fn typed_slot_and_revision_round_trip_inside_request_frame() {
 
 #[test]
 fn length_prefixed_decode_rejects_short_prefix() {
-    let err = LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&[0, 0, 0])
+    let err = TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&[0, 0, 0])
         .expect_err("short prefix must fail");
 
     assert!(matches!(err, FrameError::ShortLengthPrefix));
@@ -393,7 +426,7 @@ fn length_prefixed_decode_rejects_short_prefix() {
 #[test]
 fn length_prefixed_decode_rejects_short_payload() {
     let bytes = [0, 0, 0, 4, 1, 2, 3];
-    let err = LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes)
+    let err = TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes)
         .expect_err("short payload must fail");
 
     assert!(matches!(
@@ -408,7 +441,7 @@ fn length_prefixed_decode_rejects_short_payload() {
 #[test]
 fn length_prefixed_decode_rejects_long_payload() {
     let bytes = [0, 0, 0, 2, 1, 2, 3];
-    let err = LegacyExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes)
+    let err = TestExchangeFrame::<DomainRequest, DomainReply>::decode_length_prefixed(&bytes)
         .expect_err("long payload must fail");
 
     assert!(matches!(
@@ -437,13 +470,10 @@ struct DomainEvent {
 
 #[test]
 fn streaming_frame_subscription_event_round_trips() {
-    let event_identifier = StreamEventIdentifier::new(
-        SessionEpoch::new(1),
-        ExchangeLane::Acceptor,
-        LaneSequence::first(),
-    );
-    let frame: LegacyStreamingFrame<DomainRequest, DomainReply, DomainEvent> =
-        LegacyStreamingFrame::new(StreamingFrameBody::SubscriptionEvent {
+    let event_identifier =
+        StreamEventIdentifier::acceptor(SessionEpoch::new(1), LaneSequence::first());
+    let frame: TestStreamingFrame<DomainRequest, DomainReply, DomainEvent> =
+        streaming_frame(StreamingFrameBody::SubscriptionEvent {
             event_identifier,
             token: SubscriptionTokenInner::new(7),
             event: DomainEvent {
@@ -453,7 +483,7 @@ fn streaming_frame_subscription_event_round_trips() {
 
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyStreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(
+        TestStreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(
             &bytes,
         )
         .unwrap();
@@ -474,33 +504,30 @@ fn streaming_frame_subscription_event_round_trips() {
 
 #[test]
 fn streaming_frame_short_header_round_trips_and_is_peekable() {
-    let event_identifier = StreamEventIdentifier::new(
-        SessionEpoch::new(1),
-        ExchangeLane::Acceptor,
-        LaneSequence::first(),
-    );
-    let short_header = ShortHeader::new(0x0102_0304_0506_0708);
-    let frame: LegacyStreamingFrame<DomainRequest, DomainReply, DomainEvent> =
-        LegacyStreamingFrame::with_short_header(
-            short_header,
-            StreamingFrameBody::SubscriptionEvent {
-                event_identifier,
-                token: SubscriptionTokenInner::new(7),
-                event: DomainEvent {
-                    note: "thought arrived".into(),
-                },
+    let event_identifier =
+        StreamEventIdentifier::acceptor(SessionEpoch::new(1), LaneSequence::first());
+    let frame: TestStreamingFrame<DomainRequest, DomainReply, DomainEvent> =
+        streaming_frame(StreamingFrameBody::SubscriptionEvent {
+            event_identifier,
+            token: SubscriptionTokenInner::new(7),
+            event: DomainEvent {
+                note: "thought arrived".into(),
             },
-        );
+        });
+    let short_header = frame.short_header();
 
     let bytes = frame.encode_length_prefixed().unwrap();
     assert_eq!(
-        short_header_from_length_prefixed(&bytes).unwrap(),
+        short_header_from_length_prefixed(&bytes)
+            .unwrap()
+            .validate()
+            .unwrap(),
         short_header
     );
     assert_eq!(&bytes[4..12], &short_header.to_le_bytes());
 
     let decoded =
-        LegacyStreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(
+        TestStreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(
             &bytes,
         )
         .unwrap();
@@ -681,14 +708,14 @@ fn multi_op_request_round_trips_through_sequence() {
 fn streaming_frame_request_round_trips() {
     let exchange = fresh_exchange();
     let request = DomainRequest::new("Node").into_request();
-    let frame: LegacyStreamingFrame<DomainRequest, DomainReply, DomainEvent> =
-        LegacyStreamingFrame::new(StreamingFrameBody::Request {
+    let frame: TestStreamingFrame<DomainRequest, DomainReply, DomainEvent> =
+        streaming_frame(StreamingFrameBody::Request {
             exchange,
             request: request.clone(),
         });
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
-        LegacyStreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(
+        TestStreamingFrame::<DomainRequest, DomainReply, DomainEvent>::decode_length_prefixed(
             &bytes,
         )
         .unwrap();

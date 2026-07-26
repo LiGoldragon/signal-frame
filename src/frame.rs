@@ -19,25 +19,11 @@ pub const SHORT_HEADER_BYTE_COUNT: usize = 8;
 /// The length-prefixed wire shape is:
 ///
 /// `u32 length` -> little-endian `ShortHeader` bytes -> archived frame body.
-#[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, Debug, Default, Clone, Copy, PartialEq, Eq, Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShortHeader(u64);
 
 impl ShortHeader {
-    /// Construct a raw compatibility header.
-    ///
-    /// Production-bound frames use [`ShortHeader::bound`] through
-    /// [`BoundExchangeFrame`] or [`BoundStreamingFrame`].
-    pub const fn new(value: u64) -> Self {
-        Self(value)
-    }
-
-    pub const fn empty() -> Self {
-        Self(0)
-    }
-
-    pub const fn bound(binding: ContractBinding, route: WireRoute) -> Self {
+    const fn bound(binding: ContractBinding, route: WireRoute) -> Self {
         Self(
             binding.contract().value() as u64
                 | ((binding.revision().value() as u64) << 32)
@@ -46,29 +32,22 @@ impl ShortHeader {
         )
     }
 
-    /// Construct the only supported unbound shape for explicit legacy parsing.
-    pub const fn legacy_unbound(route: WireRoute) -> Self {
-        Self(((route.variant().value() as u64) << 48) | ((route.root().value() as u64) << 56))
-    }
-
     pub const fn value(self) -> u64 {
         self.0
     }
 
     /// Read a non-legacy binding from this header.
     ///
-    /// A zero prefix is represented only as [`FrameError::LegacyUnboundHeader`];
+    /// A zero prefix is represented only as [`FrameError::UnboundHeader`];
     /// it never materializes a `ContractId` or `WireRevision`.
-    pub const fn binding(self) -> Result<ContractBinding, FrameError> {
-        let contract = match ContractId::try_new(self.0 as u32) {
-            Ok(contract) => contract,
-            Err(_) => return Err(FrameError::LegacyUnboundHeader),
+    pub const fn binding(self) -> ContractBinding {
+        let Ok(contract) = ContractId::try_new(self.0 as u32) else {
+            unreachable!()
         };
-        let revision = match WireRevision::try_new((self.0 >> 32) as u16) {
-            Ok(revision) => revision,
-            Err(_) => return Err(FrameError::LegacyUnboundHeader),
+        let Ok(revision) = WireRevision::try_new((self.0 >> 32) as u16) else {
+            unreachable!()
         };
-        Ok(ContractBinding::new(contract, revision))
+        ContractBinding::new(contract, revision)
     }
 
     pub const fn route(self) -> WireRoute {
@@ -78,16 +57,32 @@ impl ShortHeader {
         )
     }
 
-    pub const fn is_legacy_unbound(self) -> bool {
-        self.binding().is_err()
-    }
-
     pub const fn to_le_bytes(self) -> [u8; SHORT_HEADER_BYTE_COUNT] {
         self.0.to_le_bytes()
     }
+}
 
-    pub const fn from_le_bytes(bytes: [u8; SHORT_HEADER_BYTE_COUNT]) -> Self {
+/// Parsed external prefix bytes which have not yet been accepted as a
+/// production contract binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RawShortHeader(u64);
+
+impl RawShortHeader {
+    fn from_le_bytes(bytes: [u8; SHORT_HEADER_BYTE_COUNT]) -> Self {
         Self(u64::from_le_bytes(bytes))
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+
+    pub const fn validate(self) -> Result<ShortHeader, FrameError> {
+        if ContractId::try_new(self.0 as u32).is_err()
+            || WireRevision::try_new((self.0 >> 32) as u16).is_err()
+        {
+            return Err(FrameError::UnboundHeader);
+        }
+        Ok(ShortHeader(self.0))
     }
 }
 
@@ -125,7 +120,8 @@ pub enum StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
         reply: Reply<ReplyPayload>,
     },
     /// Daemon-initiated subscription event. Rides on the acceptor's
-    /// outbound lane with its own monotonic [`crate::LaneSequence`].
+    /// outbound lane. Publisher state is responsible for allocating the
+    /// successive [`crate::LaneSequence`] values.
     SubscriptionEvent {
         event_identifier: StreamEventIdentifier,
         token: SubscriptionTokenInner,
@@ -133,87 +129,20 @@ pub enum StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
     },
 }
 
-/// Explicit migration-only envelope for archives without a contract binding.
-///
-/// Production code must use [`BoundExchangeFrame`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LegacyExchangeFrame<RequestPayload, ReplyPayload> {
-    pub short_header: ShortHeader,
-    pub body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
-}
-
-/// Explicit migration-only streaming envelope for archives without a contract
-/// binding. Production code must use [`BoundStreamingFrame`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload> {
-    pub short_header: ShortHeader,
-    pub body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
-}
-
 /// Production exchange frame whose header binding is derived from `Contract`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundExchangeFrame<Contract, RequestPayload, ReplyPayload> {
-    inner: LegacyExchangeFrame<RequestPayload, ReplyPayload>,
+    short_header: ShortHeader,
+    body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
     contract: PhantomData<fn() -> Contract>,
 }
 
 /// Production streaming frame whose header binding is derived from `Contract`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundStreamingFrame<Contract, RequestPayload, ReplyPayload, EventPayload> {
-    inner: LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>,
+    short_header: ShortHeader,
+    body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
     contract: PhantomData<fn() -> Contract>,
-}
-
-impl<RequestPayload, ReplyPayload> LegacyExchangeFrame<RequestPayload, ReplyPayload> {
-    pub fn new(body: ExchangeFrameBody<RequestPayload, ReplyPayload>) -> Self {
-        Self::with_short_header(ShortHeader::empty(), body)
-    }
-
-    pub fn with_short_header(
-        short_header: ShortHeader,
-        body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
-    ) -> Self {
-        Self { short_header, body }
-    }
-
-    pub fn short_header(&self) -> ShortHeader {
-        self.short_header
-    }
-
-    pub fn body(&self) -> &ExchangeFrameBody<RequestPayload, ReplyPayload> {
-        &self.body
-    }
-
-    pub fn into_body(self) -> ExchangeFrameBody<RequestPayload, ReplyPayload> {
-        self.body
-    }
-}
-
-impl<RequestPayload, ReplyPayload, EventPayload>
-    LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>
-{
-    pub fn new(body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>) -> Self {
-        Self::with_short_header(ShortHeader::empty(), body)
-    }
-
-    pub fn with_short_header(
-        short_header: ShortHeader,
-        body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
-    ) -> Self {
-        Self { short_header, body }
-    }
-
-    pub fn short_header(&self) -> ShortHeader {
-        self.short_header
-    }
-
-    pub fn body(&self) -> &StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
-        &self.body
-    }
-
-    pub fn into_body(self) -> StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
-        self.body
-    }
 }
 
 impl<Contract, RequestPayload, ReplyPayload>
@@ -223,24 +152,22 @@ where
 {
     pub fn new(route: WireRoute, body: ExchangeFrameBody<RequestPayload, ReplyPayload>) -> Self {
         Self {
-            inner: LegacyExchangeFrame::with_short_header(
-                ShortHeader::bound(Contract::BINDING, route),
-                body,
-            ),
+            short_header: ShortHeader::bound(Contract::BINDING, route),
+            body,
             contract: PhantomData,
         }
     }
 
     pub fn short_header(&self) -> ShortHeader {
-        self.inner.short_header()
+        self.short_header
     }
 
     pub fn body(&self) -> &ExchangeFrameBody<RequestPayload, ReplyPayload> {
-        self.inner.body()
+        &self.body
     }
 
     pub fn into_body(self) -> ExchangeFrameBody<RequestPayload, ReplyPayload> {
-        self.inner.into_body()
+        self.body
     }
 }
 
@@ -254,24 +181,22 @@ where
         body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
     ) -> Self {
         Self {
-            inner: LegacyStreamingFrame::with_short_header(
-                ShortHeader::bound(Contract::BINDING, route),
-                body,
-            ),
+            short_header: ShortHeader::bound(Contract::BINDING, route),
+            body,
             contract: PhantomData,
         }
     }
 
     pub fn short_header(&self) -> ShortHeader {
-        self.inner.short_header()
+        self.short_header
     }
 
     pub fn body(&self) -> &StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
-        self.inner.body()
+        &self.body
     }
 
     pub fn into_body(self) -> StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
-        self.inner.into_body()
+        self.body
     }
 }
 
@@ -287,7 +212,7 @@ where
 {
     rkyv::to_bytes::<rkyv::rancor::Error>(value)
         .map(|bytes| bytes.to_vec())
-        .map_err(|_| FrameError::ArchiveValidation)
+        .map_err(FrameError::ArchiveSerialize)
 }
 
 fn length_prefix(archive: Vec<u8>) -> Result<Vec<u8>, FrameError> {
@@ -316,16 +241,16 @@ fn strip_length_prefix(bytes: &[u8]) -> Result<&[u8], FrameError> {
     Ok(payload)
 }
 
-pub fn short_header_from_archive(bytes: &[u8]) -> Result<ShortHeader, FrameError> {
+pub fn short_header_from_archive(bytes: &[u8]) -> Result<RawShortHeader, FrameError> {
     let header = bytes
         .get(..SHORT_HEADER_BYTE_COUNT)
         .ok_or(FrameError::ShortHeaderTooShort { found: bytes.len() })?;
     let mut header_bytes = [0; SHORT_HEADER_BYTE_COUNT];
     header_bytes.copy_from_slice(header);
-    Ok(ShortHeader::from_le_bytes(header_bytes))
+    Ok(RawShortHeader::from_le_bytes(header_bytes))
 }
 
-pub fn short_header_from_length_prefixed(bytes: &[u8]) -> Result<ShortHeader, FrameError> {
+pub fn short_header_from_length_prefixed(bytes: &[u8]) -> Result<RawShortHeader, FrameError> {
     short_header_from_archive(strip_length_prefix(bytes)?)
 }
 
@@ -340,7 +265,7 @@ where
     Ok(frame_archive)
 }
 
-fn strip_short_header(bytes: &[u8]) -> Result<(ShortHeader, &[u8]), FrameError> {
+fn strip_short_header(bytes: &[u8]) -> Result<(RawShortHeader, &[u8]), FrameError> {
     let short_header = short_header_from_archive(bytes)?;
     Ok((short_header, &bytes[SHORT_HEADER_BYTE_COUNT..]))
 }
@@ -352,8 +277,8 @@ impl ContractBinding {
         bytes: &[u8],
         decoder: impl FnOnce(&[u8]) -> Result<Value, FrameError>,
     ) -> Result<Value, FrameError> {
-        let (header, body_archive) = strip_short_header(bytes)?;
-        self.validate_header(header)?;
+        let (raw_header, body_archive) = strip_short_header(bytes)?;
+        self.validate_header(raw_header.validate()?)?;
         decoder(body_archive)
     }
 
@@ -367,36 +292,6 @@ impl ContractBinding {
     }
 }
 
-impl<RequestPayload, ReplyPayload> LegacyExchangeFrame<RequestPayload, ReplyPayload>
-where
-    RequestPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
-    ReplyPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
-{
-    pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
-        encode_frame_archive(self.short_header, &self.body)
-    }
-
-    pub fn encode_length_prefixed(&self) -> Result<Vec<u8>, FrameError> {
-        length_prefix(self.encode()?)
-    }
-}
-
-impl<RequestPayload, ReplyPayload, EventPayload>
-    LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>
-where
-    RequestPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
-    ReplyPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
-    EventPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
-{
-    pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
-        encode_frame_archive(self.short_header, &self.body)
-    }
-
-    pub fn encode_length_prefixed(&self) -> Result<Vec<u8>, FrameError> {
-        length_prefix(self.encode()?)
-    }
-}
-
 impl<Contract, RequestPayload, ReplyPayload>
     BoundExchangeFrame<Contract, RequestPayload, ReplyPayload>
 where
@@ -405,11 +300,11 @@ where
     ReplyPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
 {
     pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
-        self.inner.encode()
+        encode_frame_archive(self.short_header, &self.body)
     }
 
     pub fn encode_length_prefixed(&self) -> Result<Vec<u8>, FrameError> {
-        self.inner.encode_length_prefixed()
+        length_prefix(self.encode()?)
     }
 }
 
@@ -422,68 +317,11 @@ where
     EventPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
 {
     pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
-        self.inner.encode()
+        encode_frame_archive(self.short_header, &self.body)
     }
 
     pub fn encode_length_prefixed(&self) -> Result<Vec<u8>, FrameError> {
-        self.inner.encode_length_prefixed()
-    }
-}
-
-impl<RequestPayload, ReplyPayload> LegacyExchangeFrame<RequestPayload, ReplyPayload>
-where
-    RequestPayload: Archive,
-    ReplyPayload: Archive,
-    <RequestPayload as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
-            rkyv::api::high::HighValidator<'archive, rkyv::rancor::Error>,
-        > + RkyvDeserialize<RequestPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
-    <ReplyPayload as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
-            rkyv::api::high::HighValidator<'archive, rkyv::rancor::Error>,
-        > + RkyvDeserialize<ReplyPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
-{
-    pub fn decode(bytes: &[u8]) -> Result<Self, FrameError> {
-        let (short_header, body_archive) = strip_short_header(bytes)?;
-        let body = rkyv::from_bytes::<
-            ExchangeFrameBody<RequestPayload, ReplyPayload>,
-            rkyv::rancor::Error,
-        >(body_archive)
-        .map_err(|_| FrameError::ArchiveDeserialize)?;
-        Ok(Self::with_short_header(short_header, body))
-    }
-
-    pub fn decode_length_prefixed(bytes: &[u8]) -> Result<Self, FrameError> {
-        Self::decode(strip_length_prefix(bytes)?)
-    }
-}
-
-impl<RequestPayload, ReplyPayload, EventPayload>
-    LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>
-where
-    RequestPayload: Archive,
-    ReplyPayload: Archive,
-    EventPayload: Archive,
-    <RequestPayload as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
-            rkyv::api::high::HighValidator<'archive, rkyv::rancor::Error>,
-        > + RkyvDeserialize<RequestPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
-    <ReplyPayload as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
-            rkyv::api::high::HighValidator<'archive, rkyv::rancor::Error>,
-        > + RkyvDeserialize<ReplyPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
-    <EventPayload as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
-            rkyv::api::high::HighValidator<'archive, rkyv::rancor::Error>,
-        > + RkyvDeserialize<EventPayload, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
-{
-    pub fn decode(bytes: &[u8]) -> Result<Self, FrameError> {
-        let (short_header, body_archive) = strip_short_header(bytes)?;
-        let body = rkyv::from_bytes::<
-            StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
-            rkyv::rancor::Error,
-        >(body_archive)
-        .map_err(|_| FrameError::ArchiveDeserialize)?;
-        Ok(Self::with_short_header(short_header, body))
-    }
-
-    pub fn decode_length_prefixed(bytes: &[u8]) -> Result<Self, FrameError> {
-        Self::decode(strip_length_prefix(bytes)?)
+        length_prefix(self.encode()?)
     }
 }
 
@@ -506,8 +344,9 @@ where
                 ExchangeFrameBody<RequestPayload, ReplyPayload>,
                 rkyv::rancor::Error,
             >(body_archive)
-            .map_err(|_| FrameError::ArchiveDeserialize)?;
-            Ok(Self::new(short_header_from_archive(bytes)?.route(), body))
+            .map_err(FrameError::ArchiveDeserialize)?;
+            let header = short_header_from_archive(bytes)?.validate()?;
+            Ok(Self::new(header.route(), body))
         })
     }
 
@@ -540,8 +379,9 @@ where
                 StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
                 rkyv::rancor::Error,
             >(body_archive)
-            .map_err(|_| FrameError::ArchiveDeserialize)?;
-            Ok(Self::new(short_header_from_archive(bytes)?.route(), body))
+            .map_err(FrameError::ArchiveDeserialize)?;
+            let header = short_header_from_archive(bytes)?.validate()?;
+            Ok(Self::new(header.route(), body))
         })
     }
 

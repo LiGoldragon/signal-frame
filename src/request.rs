@@ -17,10 +17,10 @@ use nota::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
-use crate::WireRoute;
 use crate::caller::Caller;
 use crate::log_variant::LogVariant;
 use crate::non_empty::{NonEmpty, NonEmptyError};
+use crate::{WireRoute, WireRouteError};
 
 /// One or more contract payloads that commit (or abort) as one unit.
 ///
@@ -83,8 +83,8 @@ where
     /// Multi-payload requests use the first operation as the Tier-1
     /// dispatch triage key. The full ordered payload sequence remains in
     /// the archived body.
-    pub fn route(&self) -> WireRoute {
-        WireRoute::from_log_variant(self.payloads.head().log_variant())
+    pub fn route(&self) -> Result<WireRoute, WireRouteError> {
+        WireRoute::try_from_log_variant(self.payloads.head().log_variant())
     }
 }
 

@@ -11,9 +11,10 @@ use std::{
 use nota::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    ClientShape, CommandLineSocket, CommandLineSockets, ContractBinding, ContractId,
-    ExchangeFrameBody, NonEmpty, ProcessIdentifier, Reply, RequestHead, SignalOperationHeads,
-    SingleArgument, SingleArgumentError, SubReply, WireContract, WireRevision,
+    ClientShape, CommandLineError, CommandLineSocket, CommandLineSockets, ContractBinding,
+    ContractId, ExchangeFrameBody, ExchangeIdentifier, NonEmpty, ProcessIdentifier, Reply,
+    RequestHead, SignalOperationHeads, SingleArgument, SingleArgumentError, SubReply, WireContract,
+    WireRevision,
 };
 use std::num::{NonZeroU16, NonZeroU32};
 
@@ -218,6 +219,55 @@ fn client_shape_sends_request_with_caller_and_prints_reply() {
         reply,
         encode_to_text(&working::Reply::Accepted(working::Accepted::new(true)))
     );
+
+    server.join().expect("server joins");
+    let _ = std::fs::remove_file(socket);
+}
+
+#[test]
+fn client_shape_rejects_reply_for_a_different_exchange() {
+    let socket = socket_path("client-shape-exchange-mismatch");
+    let listener = UnixListener::bind(&socket).expect("bind listener");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept client");
+        let frame = read_frame(&mut stream);
+        let ExchangeFrameBody::Request { exchange, .. } = frame.into_body() else {
+            panic!("expected request frame");
+        };
+        let wrong_exchange = ExchangeIdentifier::new(
+            exchange.session_epoch(),
+            exchange.lane(),
+            exchange.sequence().next(),
+        );
+        let reply = working::Frame::new(
+            signal_frame::WireRoute::new(
+                signal_frame::RootCode::new(0),
+                signal_frame::VariantCode::new(0),
+            ),
+            ExchangeFrameBody::Reply {
+                exchange: wrong_exchange,
+                reply: Reply::committed(NonEmpty::single(SubReply::Ok(working::Reply::Accepted(
+                    working::Accepted::new(true),
+                )))),
+            },
+        );
+        write_frame(&mut stream, &reply);
+    });
+
+    let argument =
+        SingleArgument::from_arguments(["spirit".to_string(), "(Submit {hello})".to_string()])
+            .unwrap();
+    let client = ClientShape::<working::Frame, meta::Frame>::new(CommandLineSockets::working_only(
+        socket.clone(),
+    ));
+    let error = client.reply_text(argument).unwrap_err();
+    assert!(matches!(
+        error,
+        CommandLineError::ReplyExchangeMismatch {
+            expected,
+            found,
+        } if expected.sequence().next() == found.sequence()
+    ));
 
     server.join().expect("server joins");
     let _ = std::fs::remove_file(socket);

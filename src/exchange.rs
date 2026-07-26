@@ -93,9 +93,9 @@ impl LaneSequence {
 /// reply frame echoes it. The pair is the exchange.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExchangeIdentifier {
-    pub session_epoch: SessionEpoch,
-    pub lane: ExchangeLane,
-    pub sequence: LaneSequence,
+    session_epoch: SessionEpoch,
+    lane: ExchangeLane,
+    sequence: LaneSequence,
 }
 
 impl ExchangeIdentifier {
@@ -110,30 +110,48 @@ impl ExchangeIdentifier {
             sequence,
         }
     }
+
+    pub const fn session_epoch(self) -> SessionEpoch {
+        self.session_epoch
+    }
+
+    pub const fn lane(self) -> ExchangeLane {
+        self.lane
+    }
+
+    pub const fn sequence(self) -> LaneSequence {
+        self.sequence
+    }
 }
 
 /// Identifies one subscription-event frame's position on the acceptor
-/// lane. Same wire shape as [`ExchangeIdentifier`] but a distinct type
-/// — an event is a stream item, not half of a request/reply pair. The
-/// `sequence` field exists for future resume-from-N reconnect support.
+/// lane. An event is a stream item, not half of a request/reply pair. The
+/// Publishers, not this value type, own the monotonic counter and must pass
+/// each successive sequence here.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StreamEventIdentifier {
-    pub session_epoch: SessionEpoch,
-    pub lane: ExchangeLane,
-    pub sequence: LaneSequence,
+    session_epoch: SessionEpoch,
+    sequence: LaneSequence,
 }
 
 impl StreamEventIdentifier {
-    pub const fn new(
-        session_epoch: SessionEpoch,
-        lane: ExchangeLane,
-        sequence: LaneSequence,
-    ) -> Self {
+    pub const fn acceptor(session_epoch: SessionEpoch, sequence: LaneSequence) -> Self {
         Self {
             session_epoch,
-            lane,
             sequence,
         }
+    }
+
+    pub const fn session_epoch(self) -> SessionEpoch {
+        self.session_epoch
+    }
+
+    pub const fn lane(self) -> ExchangeLane {
+        ExchangeLane::Acceptor
+    }
+
+    pub const fn sequence(self) -> LaneSequence {
+        self.sequence
     }
 }
 

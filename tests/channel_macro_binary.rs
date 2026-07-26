@@ -40,7 +40,7 @@ signal_channel! {
 fn signal_channel_macro_does_not_require_nota_text_in_default_build() {
     let operation = Operation::Ping(Ping { sequence: 7 });
     let frame = Frame::new(
-        operation.clone().into_request().route(),
+        operation.clone().into_request().route().unwrap(),
         FrameBody::Request {
             exchange: ExchangeIdentifier::new(
                 SessionEpoch::new(1),
@@ -50,6 +50,7 @@ fn signal_channel_macro_does_not_require_nota_text_in_default_build() {
             request: operation.clone().into_request(),
         },
     );
+    let frame: signal_frame::BoundExchangeFrame<TestContract, Operation, Reply> = frame;
 
     let bytes = frame.encode_length_prefixed().expect("encode request");
     let decoded = Frame::decode_length_prefixed(&bytes).expect("decode");

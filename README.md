@@ -13,14 +13,24 @@ daemon, one NOTA reply out. Domain records and contract-local operation
 roots live in the per-component contract crates that depend on this
 one.
 
-Every production frame can use the contract-bound envelope seam. Its
+Every frame uses the contract-bound envelope seam. Its
 eight-byte short header packs `ContractId(u32)`, `WireRevision(u16)`,
 `VariantCode(u8)`, and `RootCode(u8)` in that bit order. Contract crates
 implement `WireContract`; bound constructors derive the binding for
 request, reply, handshake/control, and subscription-event frames, and
-bound decoders reject legacy zero, wrong-contract, and wrong-revision
+bound decoders reject zero, wrong-contract, and wrong-revision
 headers before archive decoding. Allocation constants and registry
 enumerations do not live in this generic crate.
+
+## 0.4 migration
+
+The producer API is deliberately breaking. `LegacyExchangeFrame`,
+`LegacyStreamingFrame`, and unchecked `ShortHeader` constructors are
+removed. Consumers must implement `WireContract` and use
+`BoundExchangeFrame` or `BoundStreamingFrame`. Prefix peeking now returns
+`RawShortHeader`; call `validate` before using it as a `ShortHeader`.
+`Request::route` and macro-generated `Operation::into_frame` are fallible
+because route values with bits above the low sixteen are rejected.
 
 `signal-frame` is the renamed successor to the former `signal-core`
 crate. The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
@@ -38,7 +48,7 @@ grammar alive for contracts that have not moved to schema:
 
 ```rust
 signal_channel! {
-    channel Message {
+    channel Message contract MessageContract {
         operation Submit(Submission),
         operation Query(InboxQuery),
     }

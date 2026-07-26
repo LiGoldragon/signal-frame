@@ -1,0 +1,18 @@
+error[E0432]: unresolved imports `signal_frame::LegacyExchangeFrame`, `signal_frame::LegacyStreamingFrame`
+ --> tests/ui/wire_binding/legacy_api.rs:1:20
+  |
+1 | use signal_frame::{LegacyExchangeFrame, LegacyStreamingFrame};
+  |                    ^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^ no `LegacyStreamingFrame` in the root
+  |                    |
+  |                    no `LegacyExchangeFrame` in the root
+  |
+help: a similar name exists in the module
+  |
+1 - use signal_frame::{LegacyExchangeFrame, LegacyStreamingFrame};
+1 + use signal_frame::{BoundExchangeFrame, LegacyStreamingFrame};
+  |
+help: a similar name exists in the module
+  |
+1 - use signal_frame::{LegacyExchangeFrame, LegacyStreamingFrame};
+1 + use signal_frame::{LegacyExchangeFrame, BoundStreamingFrame};
+  |

@@ -1,0 +1,16 @@
+error[E0599]: no associated function or constant named `new` found for struct `StreamEventIdentifier` in the current scope
+ --> tests/ui/wire_binding/stream_connector.rs:4:36
+  |
+4 |     let _ = StreamEventIdentifier::new(
+  |                                    ^^^ associated function or constant not found in `StreamEventIdentifier`
+  |
+note: if you're trying to build a new `StreamEventIdentifier`, consider using `StreamEventIdentifier::acceptor` which returns `StreamEventIdentifier`
+ --> src/exchange.rs
+  |
+  |     pub const fn acceptor(session_epoch: SessionEpoch, sequence: LaneSequence) -> Self {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is a method `ne` with a similar name, but with different arguments
+ --> $RUST/core/src/cmp.rs
+  |
+  |     fn ne(&self, other: &Rhs) -> bool {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -50,11 +50,11 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
 
 - Two frame types and their bodies — one per channel shape — plus
   length-prefixed rkyv encoding helpers shared between them:
-  - `LegacyExchangeFrame<RequestPayload, ReplyPayload>` /
+  - `BoundExchangeFrame<Contract, RequestPayload, ReplyPayload>` /
     `ExchangeFrameBody<RequestPayload, ReplyPayload>` — non-streaming
     channels. Four variants: `HandshakeRequest`, `HandshakeReply`,
     `Request { exchange, request }`, `Reply { exchange, reply }`.
-  - `LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>` /
+  - `BoundStreamingFrame<Contract, RequestPayload, ReplyPayload, EventPayload>` /
     `StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>` —
     streaming channels. Adds the fifth variant
     `SubscriptionEvent { event_identifier, token, event }`.
@@ -66,8 +66,8 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   and wire revision; its high 16 bits carry the contract-local route.
   `BoundExchangeFrame<C, ..>` and `BoundStreamingFrame<C, ..>` derive
   production bindings from `C: WireContract`. Explicitly named
-  `LegacyExchangeFrame` / `LegacyStreamingFrame` migration envelopes retain
-  unbound archive support; generated production paths never expose them.
+  Raw prefix bytes are represented by `RawShortHeader` and must validate
+  into a bound `ShortHeader`; no producer API emits unbound archives.
 - The `ShortHeader` prefix that schema-generated route projections
   consume. Richer schema-defined header surfaces are emitted by
   `schema-rust` in component crates; this kernel owns only the
@@ -77,8 +77,8 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
 - `ExchangeIdentifier`, `StreamEventIdentifier`, `ExchangeLane`,
   `LaneSequence`, `SessionEpoch` — frame-layer identity for async
   request/reply correlation and subscription-event placement.
-  `LaneSequence` is per-lane monotonic; both identifier types embed
-  it.
+  Both identifier types embed `LaneSequence`. Publisher state owns and
+  preserves monotonic sequence allocation; the value type does not prove it.
 - `Slot<T>` and `Revision` — frame-bound wire identity records.
 - `NonEmpty<T>` — the type-level non-empty sequence used as the
   ordered payload unit inside `Request`.
@@ -186,8 +186,8 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   Payloads never carry transport identifiers.
 - Subscription events ride on the acceptor's outbound lane as
   `StreamingFrameBody::SubscriptionEvent` carrying a
-  `StreamEventIdentifier` (same wire shape as `ExchangeIdentifier`,
-  distinct type) and a `SubscriptionTokenInner` routing key.
+  `StreamEventIdentifier` (structurally acceptor-lane-only) and a
+  `SubscriptionTokenInner` routing key.
 - `signal_channel!` is the standard declaration shape for domain
   channels. The engine is a proc-macro living in the sibling
   `signal-frame-macros` crate; `signal-frame` re-exports it as
@@ -297,9 +297,9 @@ frame body:
 | 48..55 | `VariantCode(u8)` | contract-local route variant |
 | 56..63 | `RootCode(u8)` | contract-local route root |
 
-`ContractId` and `WireRevision` reserve zero. Legacy headers remain
-representable through `ShortHeader::legacy_unbound`, but every
-production-bound decoder rejects them before rkyv is invoked.
+`ContractId` and `WireRevision` reserve zero. Parsed prefix bytes remain a
+`RawShortHeader` until both identifiers validate; zero never materializes as
+a production `ShortHeader`.
 
 The contract and revision are encoded truth, not inferred from socket
 placement, payload shape, names, hashes, or probability. `WireContract`
@@ -316,7 +316,7 @@ bits. The remaining header bits are never route vocabulary.
 Generated dispatch reads the typed route accessors. A root or variant
 has meaning only after the contract binding has been validated.
 
-### 5.4 · Bound and legacy frame surfaces
+### 5.4 · Bound frame surfaces
 
 `BoundExchangeFrame<C, ..>` and `BoundStreamingFrame<C, ..>` are the
 production seam. Their constructors accept a route and body, derive
@@ -324,10 +324,9 @@ production seam. Their constructors accept a route and body, derive
 subscription-event bodies uniformly. Their decoders validate length,
 contract, and revision before archive bytecheck or deserialization.
 
-`LegacyExchangeFrame` and `LegacyStreamingFrame` remain backward-compatible generic
-envelopes. Their raw and empty-header constructors are legacy
-compatibility APIs; ordinary ingress must not decode them as production
-bound traffic.
+There is no unbound producer envelope, raw header constructor, or legacy
+encoder. Migration consumers must move to an allocated `WireContract`
+binding before producing frames.
 
 ### 5.6 · Tier 2 — extended 64-byte / 512-bit identity-bearing tier
 
@@ -427,7 +426,7 @@ implementation lives in sibling `signal-frame-macros`.
 - Contract-ID allocation constants belong in the workspace registry
   owner and are intentionally absent from this crate.
 - Contract crates may adopt the bound wrappers directly while older
-  consumers migrate from the generic legacy envelopes.
+  consumers migrate to the bound envelopes.
 
 ## 6 · Migration history — from signal-core to signal-frame
 
@@ -488,8 +487,8 @@ src/subscription.rs   SubscriptionTokenInner
 src/non_empty.rs      NonEmpty<T> and NonEmptyError
 src/command_line.rs   thin-CLI argument, route table, socket client,
                       reply rendering, and signal_cli! macro
-src/frame.rs          LegacyExchangeFrame / ExchangeFrameBody,
-                      LegacyStreamingFrame / StreamingFrameBody,
+src/frame.rs          BoundExchangeFrame / ExchangeFrameBody,
+                      BoundStreamingFrame / StreamingFrameBody,
                       length-prefix helpers
 tests/frame.rs        rkyv round-trip + NOTA round-trip tests
 tests/channel_macro.rs

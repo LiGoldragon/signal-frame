@@ -1,14 +1,14 @@
 use thiserror::Error;
 
-use crate::{ContractId, WireRevision};
+use crate::{ContractId, WireRevision, WireRouteError};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum FrameError {
-    #[error("rkyv archive validation failed")]
-    ArchiveValidation,
+    #[error("rkyv archive serialization failed")]
+    ArchiveSerialize(#[source] rkyv::rancor::Error),
 
     #[error("rkyv archive deserialization failed")]
-    ArchiveDeserialize,
+    ArchiveDeserialize(#[source] rkyv::rancor::Error),
 
     #[error("frame is shorter than the four byte length prefix")]
     ShortLengthPrefix,
@@ -19,8 +19,8 @@ pub enum FrameError {
     #[error("frame length mismatch: expected {expected} bytes, found {found}")]
     LengthMismatch { expected: usize, found: usize },
 
-    #[error("legacy frame header has no production contract binding")]
-    LegacyUnboundHeader,
+    #[error("raw frame header has no production contract binding")]
+    UnboundHeader,
 
     #[error("frame contract mismatch: expected {expected:?}, found {found:?}")]
     ContractMismatch {
@@ -36,4 +36,7 @@ pub enum FrameError {
         expected: WireRevision,
         found: WireRevision,
     },
+
+    #[error(transparent)]
+    InvalidRoute(#[from] WireRouteError),
 }

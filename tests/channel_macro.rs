@@ -20,10 +20,11 @@ impl WireContract for TestContract {
 }
 
 fn bound_header(root: u8) -> ShortHeader {
-    ShortHeader::bound(
-        TestContract::BINDING,
+    message::Frame::new(
         WireRoute::new(RootCode::new(root), VariantCode::new(0)),
+        ExchangeFrameBody::HandshakeRequest(signal_frame::HandshakeRequest::current()),
     )
+    .short_header()
 }
 
 #[derive(
@@ -259,7 +260,7 @@ fn macro_emits_log_variant_for_operation_short_headers() {
     assert_eq!(signal_frame::LogVariant::log_variant(&submit), 0);
     assert_eq!(signal_frame::LogVariant::log_variant(&query), 1);
     assert_eq!(
-        query.into_request().route(),
+        query.into_request().route().unwrap(),
         WireRoute::new(RootCode::new(1), VariantCode::new(0))
     );
     assert_eq!(
@@ -338,7 +339,7 @@ fn macro_frame_alias_round_trips_with_generated_payloads() {
     let exchange = fresh_exchange();
     let request = MessageOperation::Submit(Submission::new("frame")).into_request();
     let frame = MessageFrame::new(
-        request.route(),
+        request.route().unwrap(),
         ExchangeFrameBody::Request {
             exchange,
             request: request.clone(),
@@ -445,11 +446,8 @@ fn macro_stream_witnesses_are_contract_local_not_subscribe_retract_bound() {
 
 #[test]
 fn macro_streaming_frame_alias_round_trips() {
-    let event_identifier = signal_frame::StreamEventIdentifier::new(
-        SessionEpoch::new(1),
-        ExchangeLane::Acceptor,
-        LaneSequence::first(),
-    );
+    let event_identifier =
+        signal_frame::StreamEventIdentifier::acceptor(SessionEpoch::new(1), LaneSequence::first());
     let frame = TerminalFrame::new(
         WireRoute::new(RootCode::new(0), VariantCode::new(0)),
         StreamingFrameBody::SubscriptionEvent {
@@ -896,11 +894,8 @@ fn observable_filter_default_routes_through_observer_set() {
 
 #[test]
 fn observable_streaming_frame_alias_carries_observer_events() {
-    let event_identifier = signal_frame::StreamEventIdentifier::new(
-        SessionEpoch::new(1),
-        ExchangeLane::Acceptor,
-        LaneSequence::first(),
-    );
+    let event_identifier =
+        signal_frame::StreamEventIdentifier::acceptor(SessionEpoch::new(1), LaneSequence::first());
     let event = LedgerEvent::EffectEmitted(EffectEmitted {
         effect_label: "Assert".to_string(),
     });

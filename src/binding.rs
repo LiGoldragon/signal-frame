@@ -19,7 +19,7 @@ impl ContractId {
     pub const fn try_new(value: u32) -> Result<Self, BindingIdentifierError> {
         match NonZeroU32::new(value) {
             Some(value) => Ok(Self(value)),
-            None => Err(BindingIdentifierError::ReservedLegacyContractId),
+            None => Err(BindingIdentifierError::ReservedContractId),
         }
     }
 
@@ -44,7 +44,7 @@ impl WireRevision {
     pub const fn try_new(value: u16) -> Result<Self, BindingIdentifierError> {
         match NonZeroU16::new(value) {
             Some(value) => Ok(Self(value)),
-            None => Err(BindingIdentifierError::ReservedLegacyWireRevision),
+            None => Err(BindingIdentifierError::ReservedWireRevision),
         }
     }
 
@@ -74,7 +74,7 @@ impl ContractBinding {
     }
 
     pub fn validate_header(self, header: crate::ShortHeader) -> Result<(), FrameError> {
-        let found = header.binding()?;
+        let found = header.binding();
         if found.contract != self.contract {
             return Err(FrameError::ContractMismatch {
                 expected: self.contract,
@@ -134,11 +134,14 @@ impl WireRoute {
         Self { root, variant }
     }
 
-    pub const fn from_log_variant(value: u64) -> Self {
-        Self {
+    pub const fn try_from_log_variant(value: u64) -> Result<Self, WireRouteError> {
+        if value & 0xffff_ffff_ffff_0000 != 0 {
+            return Err(WireRouteError::BitsOutsideRoute { value });
+        }
+        Ok(Self {
             root: RootCode::new(value as u8),
             variant: VariantCode::new((value >> 8) as u8),
-        }
+        })
     }
 
     pub const fn root(self) -> RootCode {
@@ -160,8 +163,14 @@ pub trait WireContract {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum BindingIdentifierError {
-    #[error("contract id zero is reserved for explicit legacy parsing")]
-    ReservedLegacyContractId,
-    #[error("wire revision zero is reserved for explicit legacy parsing")]
-    ReservedLegacyWireRevision,
+    #[error("contract id zero is reserved")]
+    ReservedContractId,
+    #[error("wire revision zero is reserved")]
+    ReservedWireRevision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum WireRouteError {
+    #[error("log variant contains bits outside the root/variant high sixteen: {value:#018x}")]
+    BitsOutsideRoute { value: u64 },
 }

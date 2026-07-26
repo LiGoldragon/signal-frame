@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::{
     BoundExchangeFrame, BoundStreamingFrame, Caller, ExchangeFrameBody, ExchangeIdentifier,
     ExchangeLane, LaneSequence, LogVariant, NonEmpty, Reply, Request, RequestPayload, SessionEpoch,
-    SignalOperationHeads, StreamingFrameBody, SubReply, WireContract,
+    SignalOperationHeads, StreamingFrameBody, SubReply, WireContract, WireRouteError,
 };
 
 type HighSerializer<'archive> = rkyv::api::high::HighSerializer<
@@ -79,6 +79,15 @@ pub enum CommandLineError {
 
     #[error("request rejected before execution: {reason}")]
     RequestRejected { reason: String },
+
+    #[error("request route cannot be represented in the short header: {0}")]
+    InvalidRoute(#[from] WireRouteError),
+
+    #[error("reply exchange mismatch: expected {expected:?}, found {found:?}")]
+    ReplyExchangeMismatch {
+        expected: ExchangeIdentifier,
+        found: ExchangeIdentifier,
+    },
 }
 
 impl CommandLineError {
@@ -116,7 +125,9 @@ impl CommandLineError {
             Self::SignalFrame { .. }
             | Self::FrameTooLarge { .. }
             | Self::UnexpectedFrame { .. }
-            | Self::RequestRejected { .. } => ExitCode::from(70),
+            | Self::RequestRejected { .. }
+            | Self::InvalidRoute(_)
+            | Self::ReplyExchangeMismatch { .. } => ExitCode::from(70),
         }
     }
 }
@@ -457,8 +468,14 @@ pub trait ClientFrame: Sized {
     type Operation;
     type Reply;
 
-    fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self;
-    fn reply_from_frame(self) -> Result<Reply<Self::Reply>, CommandLineError>;
+    fn request_frame(
+        exchange: ExchangeIdentifier,
+        request: Request<Self::Operation>,
+    ) -> Result<Self, CommandLineError>;
+    fn reply_from_frame(
+        self,
+        expected_exchange: ExchangeIdentifier,
+    ) -> Result<Reply<Self::Reply>, CommandLineError>;
     fn encode_client_frame(&self) -> Result<Vec<u8>, CommandLineError>;
     fn decode_client_frame(bytes: &[u8]) -> Result<Self, CommandLineError>;
 }
@@ -479,16 +496,30 @@ where
     type Operation = Operation;
     type Reply = ReplyPayload;
 
-    fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self {
-        Self::new(
-            request.route(),
+    fn request_frame(
+        exchange: ExchangeIdentifier,
+        request: Request<Self::Operation>,
+    ) -> Result<Self, CommandLineError> {
+        Ok(Self::new(
+            request.route()?,
             ExchangeFrameBody::Request { exchange, request },
-        )
+        ))
     }
 
-    fn reply_from_frame(self) -> Result<Reply<Self::Reply>, CommandLineError> {
+    fn reply_from_frame(
+        self,
+        expected_exchange: ExchangeIdentifier,
+    ) -> Result<Reply<Self::Reply>, CommandLineError> {
         match self.into_body() {
-            ExchangeFrameBody::Reply { reply, .. } => Ok(reply),
+            ExchangeFrameBody::Reply { exchange, reply } if exchange == expected_exchange => {
+                Ok(reply)
+            }
+            ExchangeFrameBody::Reply {
+                exchange: found, ..
+            } => Err(CommandLineError::ReplyExchangeMismatch {
+                expected: expected_exchange,
+                found,
+            }),
             other => Err(CommandLineError::UnexpectedFrame {
                 expected: "reply",
                 got: format!("{other:?}"),
@@ -526,16 +557,30 @@ where
     type Operation = Operation;
     type Reply = ReplyPayload;
 
-    fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self {
-        Self::new(
-            request.route(),
+    fn request_frame(
+        exchange: ExchangeIdentifier,
+        request: Request<Self::Operation>,
+    ) -> Result<Self, CommandLineError> {
+        Ok(Self::new(
+            request.route()?,
             StreamingFrameBody::Request { exchange, request },
-        )
+        ))
     }
 
-    fn reply_from_frame(self) -> Result<Reply<Self::Reply>, CommandLineError> {
+    fn reply_from_frame(
+        self,
+        expected_exchange: ExchangeIdentifier,
+    ) -> Result<Reply<Self::Reply>, CommandLineError> {
         match self.into_body() {
-            StreamingFrameBody::Reply { reply, .. } => Ok(reply),
+            StreamingFrameBody::Reply { exchange, reply } if exchange == expected_exchange => {
+                Ok(reply)
+            }
+            StreamingFrameBody::Reply {
+                exchange: found, ..
+            } => Err(CommandLineError::ReplyExchangeMismatch {
+                expected: expected_exchange,
+                found,
+            }),
             other => Err(CommandLineError::UnexpectedFrame {
                 expected: "reply",
                 got: format!("{other:?}"),
@@ -640,10 +685,14 @@ where
         Frame::Reply: Debug,
     {
         let mut stream = UnixStream::connect(socket).map_err(CommandLineError::input_output)?;
-        let frame = Frame::request_frame(Self::exchange(), request);
+        // Each invocation opens a fresh connection, writes exactly one request,
+        // reads exactly one reply, and then drops the stream. Sequence zero is
+        // therefore the sole connector-lane exchange on this connection.
+        let exchange = Self::exchange();
+        let frame = Frame::request_frame(exchange, request)?;
         self.write_frame(&mut stream, &frame)?;
         let reply = self.read_frame::<Frame>(&mut stream)?;
-        Self::reply_payloads(reply.reply_from_frame()?)
+        Self::reply_payloads(reply.reply_from_frame(exchange)?)
     }
 
     fn write_frame<Frame>(

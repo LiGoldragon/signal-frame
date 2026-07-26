@@ -741,10 +741,10 @@ fn emit_frame_builders(spec: &ChannelSpec) -> TokenStream {
             pub fn into_frame(
                 self,
                 exchange: ::signal_frame::ExchangeIdentifier,
-            ) -> Frame {
+            ) -> ::core::result::Result<Frame, ::signal_frame::WireRouteError> {
                 let request = ::signal_frame::Request::from_payload(self);
-                let route = request.route();
-                Frame::new(route, FrameBody::Request { exchange, request })
+                let route = request.route()?;
+                Ok(Frame::new(route, FrameBody::Request { exchange, request }))
             }
         }
     }

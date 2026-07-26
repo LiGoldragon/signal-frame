@@ -40,7 +40,7 @@ pub mod version;
 
 pub use binding::{
     BindingIdentifierError, ContractBinding, ContractId, RootCode, VariantCode, WireContract,
-    WireRevision, WireRoute,
+    WireRevision, WireRoute, WireRouteError,
 };
 pub use caller::{Caller, CallerIdentity, ExecutablePath, ProcessIdentifier, ProcessStartTime};
 #[cfg(feature = "nota-text")]
@@ -55,9 +55,9 @@ pub use exchange::{
     StreamEventIdentifier,
 };
 pub use frame::{
-    BoundExchangeFrame, BoundStreamingFrame, ExchangeFrameBody, LegacyExchangeFrame,
-    LegacyStreamingFrame, SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrameBody,
-    short_header_from_archive, short_header_from_length_prefixed,
+    BoundExchangeFrame, BoundStreamingFrame, ExchangeFrameBody, RawShortHeader,
+    SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrameBody, short_header_from_archive,
+    short_header_from_length_prefixed,
 };
 pub use identity::{Revision, Slot};
 pub use log_variant::LogVariant;
