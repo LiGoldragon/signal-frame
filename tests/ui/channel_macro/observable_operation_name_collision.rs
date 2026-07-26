@@ -12,7 +12,7 @@ pub struct EffectEmitted;
 // operation collides — the contract author must rename the domain
 // verb (the observability verbs are workspace-uniform; not negotiable).
 signal_channel! {
-    channel Ledger {
+    channel Ledger contract TestContract {
         operation Tap(TapPayload),
         operation Record(Note),
     }

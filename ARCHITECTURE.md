@@ -50,11 +50,11 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
 
 - Two frame types and their bodies — one per channel shape — plus
   length-prefixed rkyv encoding helpers shared between them:
-  - `ExchangeFrame<RequestPayload, ReplyPayload>` /
+  - `LegacyExchangeFrame<RequestPayload, ReplyPayload>` /
     `ExchangeFrameBody<RequestPayload, ReplyPayload>` — non-streaming
     channels. Four variants: `HandshakeRequest`, `HandshakeReply`,
     `Request { exchange, request }`, `Reply { exchange, reply }`.
-  - `StreamingFrame<RequestPayload, ReplyPayload, EventPayload>` /
+  - `LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>` /
     `StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>` —
     streaming channels. Adds the fifth variant
     `SubscriptionEvent { event_identifier, token, event }`.
@@ -65,9 +65,9 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   every frame archive. Its low 48 bits bind the archive to a contract
   and wire revision; its high 16 bits carry the contract-local route.
   `BoundExchangeFrame<C, ..>` and `BoundStreamingFrame<C, ..>` derive
-  production bindings from `C: WireContract`. The unbound `Frame`
-  constructors remain only as compatibility surfaces for legacy
-  consumers.
+  production bindings from `C: WireContract`. Explicitly named
+  `LegacyExchangeFrame` / `LegacyStreamingFrame` migration envelopes retain
+  unbound archive support; generated production paths never expose them.
 - The `ShortHeader` prefix that schema-generated route projections
   consume. Richer schema-defined header surfaces are emitted by
   `schema-rust` in component crates; this kernel owns only the
@@ -324,7 +324,7 @@ production seam. Their constructors accept a route and body, derive
 subscription-event bodies uniformly. Their decoders validate length,
 contract, and revision before archive bytecheck or deserialization.
 
-`ExchangeFrame` and `StreamingFrame` remain backward-compatible generic
+`LegacyExchangeFrame` and `LegacyStreamingFrame` remain backward-compatible generic
 envelopes. Their raw and empty-header constructors are legacy
 compatibility APIs; ordinary ingress must not decode them as production
 bound traffic.
@@ -488,8 +488,8 @@ src/subscription.rs   SubscriptionTokenInner
 src/non_empty.rs      NonEmpty<T> and NonEmptyError
 src/command_line.rs   thin-CLI argument, route table, socket client,
                       reply rendering, and signal_cli! macro
-src/frame.rs          ExchangeFrame / ExchangeFrameBody,
-                      StreamingFrame / StreamingFrameBody,
+src/frame.rs          LegacyExchangeFrame / ExchangeFrameBody,
+                      LegacyStreamingFrame / StreamingFrameBody,
                       length-prefix helpers
 tests/frame.rs        rkyv round-trip + NOTA round-trip tests
 tests/channel_macro.rs

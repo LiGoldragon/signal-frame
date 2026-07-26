@@ -7,6 +7,7 @@ fn channel_macro_rejects_invalid_contract_local_shapes() {
     tests.compile_fail("tests/ui/channel_macro/observable_missing_events.rs");
     tests.compile_fail("tests/ui/channel_macro/observable_missing_filter.rs");
     tests.compile_fail("tests/ui/channel_macro/observable_operation_name_collision.rs");
+    tests.compile_fail("tests/ui/channel_macro/missing_contract.rs");
     tests.compile_fail("tests/ui/channel_macro/old_verb_tagged_shape.rs");
     tests.compile_fail("tests/ui/channel_macro/orphan_stream.rs");
     tests.compile_fail("tests/ui/channel_macro/reverse_belongs_mismatch.rs");

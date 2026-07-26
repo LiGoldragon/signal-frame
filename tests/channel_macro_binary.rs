@@ -2,9 +2,20 @@
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty, Reply as FrameReply, RequestPayload,
-    SessionEpoch, SubReply, signal_channel,
+    ContractBinding, ContractId, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
+    Reply as FrameReply, RequestPayload, SessionEpoch, SubReply, WireContract, WireRevision,
+    signal_channel,
 };
+use std::num::{NonZeroU16, NonZeroU32};
+
+struct TestContract;
+
+impl WireContract for TestContract {
+    const BINDING: ContractBinding = ContractBinding::new(
+        ContractId::new(NonZeroU32::MIN),
+        WireRevision::new(NonZeroU16::MIN),
+    );
+}
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Ping {
@@ -17,7 +28,7 @@ pub struct Pong {
 }
 
 signal_channel! {
-    channel BinaryOnly {
+    channel BinaryOnly contract TestContract {
         operation Ping(Ping),
     }
     reply Reply {
@@ -28,14 +39,17 @@ signal_channel! {
 #[test]
 fn signal_channel_macro_does_not_require_nota_text_in_default_build() {
     let operation = Operation::Ping(Ping { sequence: 7 });
-    let frame = Frame::new(FrameBody::Request {
-        exchange: ExchangeIdentifier::new(
-            SessionEpoch::new(1),
-            ExchangeLane::Connector,
-            LaneSequence::first(),
-        ),
-        request: operation.clone().into_request(),
-    });
+    let frame = Frame::new(
+        operation.clone().into_request().route(),
+        FrameBody::Request {
+            exchange: ExchangeIdentifier::new(
+                SessionEpoch::new(1),
+                ExchangeLane::Connector,
+                LaneSequence::first(),
+            ),
+            request: operation.clone().into_request(),
+        },
+    );
 
     let bytes = frame.encode_length_prefixed().expect("encode request");
     let decoded = Frame::decode_length_prefixed(&bytes).expect("decode");
@@ -48,14 +62,20 @@ fn signal_channel_macro_does_not_require_nota_text_in_default_build() {
     }
 
     let reply = Reply::Pong(Pong { sequence: 7 });
-    let frame = Frame::new(FrameBody::Reply {
-        exchange: ExchangeIdentifier::new(
-            SessionEpoch::new(1),
-            ExchangeLane::Connector,
-            LaneSequence::first(),
+    let frame = Frame::new(
+        signal_frame::WireRoute::new(
+            signal_frame::RootCode::new(0),
+            signal_frame::VariantCode::new(0),
         ),
-        reply: FrameReply::committed(NonEmpty::single(SubReply::Ok(reply.clone()))),
-    });
+        FrameBody::Reply {
+            exchange: ExchangeIdentifier::new(
+                SessionEpoch::new(1),
+                ExchangeLane::Connector,
+                LaneSequence::first(),
+            ),
+            reply: FrameReply::committed(NonEmpty::single(SubReply::Ok(reply.clone()))),
+        },
+    );
 
     let bytes = frame.encode_length_prefixed().expect("encode reply");
     let decoded = Frame::decode_length_prefixed(&bytes).expect("decode");

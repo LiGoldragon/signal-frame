@@ -1,8 +1,8 @@
 //! Signal proc macros.
 //!
 //! ```ignore
-//! legacy_signal_channel! {
-//!     channel Ledger {
+//! signal_channel! {
+//!     channel Ledger contract LedgerWire {
 //!         operation Receive(HookNotification),
 //!         operation Push(Push),
 //!         operation Query(Query),
@@ -16,8 +16,7 @@
 //! }
 //! ```
 //!
-//! `legacy_signal_channel!` emits the frame-kernel outputs for the old
-//! handwritten macro body without any universal verb tag: no
+//! `signal_channel!` emits bound frame-kernel outputs without any universal verb tag: no
 //! `SignalVerb`, no `signal_verb()` method, and no per-operation
 //! kernel wrapper. Contract-local operation roots are the generated
 //! request-payload enum variants.
@@ -42,16 +41,11 @@ use proc_macro::TokenStream;
 use crate::model::ChannelSpec;
 
 #[proc_macro]
-pub fn legacy_signal_channel(input: TokenStream) -> TokenStream {
-    expand_legacy_signal_channel(input)
-}
-
-#[proc_macro]
 pub fn signal_channel(input: TokenStream) -> TokenStream {
-    expand_legacy_signal_channel(input)
+    expand_signal_channel(input)
 }
 
-fn expand_legacy_signal_channel(input: TokenStream) -> TokenStream {
+fn expand_signal_channel(input: TokenStream) -> TokenStream {
     let spec = match syn::parse::<ChannelSpec>(input) {
         Ok(spec) => spec,
         Err(error) => return error.into_compile_error().into(),

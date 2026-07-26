@@ -11,10 +11,20 @@ use std::{
 use nota::{NotaDecode, NotaEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    ClientShape, CommandLineSocket, CommandLineSockets, ExchangeFrameBody, NonEmpty,
-    ProcessIdentifier, Reply, RequestHead, SignalOperationHeads, SingleArgument,
-    SingleArgumentError, SubReply,
+    ClientShape, CommandLineSocket, CommandLineSockets, ContractBinding, ContractId,
+    ExchangeFrameBody, NonEmpty, ProcessIdentifier, Reply, RequestHead, SignalOperationHeads,
+    SingleArgument, SingleArgumentError, SubReply, WireContract, WireRevision,
 };
+use std::num::{NonZeroU16, NonZeroU32};
+
+struct TestContract;
+
+impl WireContract for TestContract {
+    const BINDING: ContractBinding = ContractBinding::new(
+        ContractId::new(NonZeroU32::MIN),
+        WireRevision::new(NonZeroU16::MIN),
+    );
+}
 
 mod working {
     use super::*;
@@ -53,7 +63,7 @@ mod working {
     }
 
     signal_frame::signal_channel! {
-        channel Working {
+        channel Working contract TestContract {
             operation Submit(Submission),
             operation Query(Query),
         }
@@ -77,7 +87,7 @@ mod meta {
     pub struct Drained {}
 
     signal_frame::signal_channel! {
-        channel Meta {
+        channel Meta contract TestContract {
             operation Drain(Drain),
         }
         reply Reply {
@@ -181,12 +191,18 @@ fn client_shape_sends_request_with_caller_and_prints_reply() {
             &working::Operation::Submit(working::Submission::new("hello"))
         );
 
-        let reply = working::Frame::new(ExchangeFrameBody::Reply {
-            exchange,
-            reply: Reply::committed(NonEmpty::single(SubReply::Ok(working::Reply::Accepted(
-                working::Accepted::new(true),
-            )))),
-        });
+        let reply = working::Frame::new(
+            signal_frame::WireRoute::new(
+                signal_frame::RootCode::new(0),
+                signal_frame::VariantCode::new(0),
+            ),
+            ExchangeFrameBody::Reply {
+                exchange,
+                reply: Reply::committed(NonEmpty::single(SubReply::Ok(working::Reply::Accepted(
+                    working::Accepted::new(true),
+                )))),
+            },
+        );
         write_frame(&mut stream, &reply);
     });
 
@@ -220,15 +236,21 @@ fn client_shape_prints_multi_operation_replies_as_sequence() {
         assert!(request.caller().is_some());
         assert_eq!(request.payloads().len(), 2);
 
-        let reply = working::Frame::new(ExchangeFrameBody::Reply {
-            exchange,
-            reply: Reply::committed(NonEmpty::from_head_and_tail(
-                SubReply::Ok(working::Reply::Accepted(working::Accepted::new(true))),
-                vec![SubReply::Ok(working::Reply::Accepted(
-                    working::Accepted::new(false),
-                ))],
-            )),
-        });
+        let reply = working::Frame::new(
+            signal_frame::WireRoute::new(
+                signal_frame::RootCode::new(0),
+                signal_frame::VariantCode::new(0),
+            ),
+            ExchangeFrameBody::Reply {
+                exchange,
+                reply: Reply::committed(NonEmpty::from_head_and_tail(
+                    SubReply::Ok(working::Reply::Accepted(working::Accepted::new(true))),
+                    vec![SubReply::Ok(working::Reply::Accepted(
+                        working::Accepted::new(false),
+                    ))],
+                )),
+            },
+        );
         write_frame(&mut stream, &reply);
     });
 

@@ -1,25 +1,23 @@
 # signal-frame-macros
 
-Proc-macro front door for `signal_channel!` and the migration-named
-alias `legacy_signal_channel!`.
+Proc-macro front door for production `signal_channel!` declarations.
 
 Schema-driven Rust generation lives in `schema-rust` build
 generation. This proc-macro crate keeps the current hand-written
 contract declaration grammar alive while contracts migrate.
 
-`legacy_signal_channel!` is the old handwritten channel declaration
-grammar. It remains only while existing contracts migrate to schema.
-`signal_channel!` is a compatibility alias for that old path.
+Every declaration names a `WireContract` marker. The macro emits bound frame
+aliases, so callers cannot select a contract or revision per frame.
 
-## Legacy Contract-Local Operation Grammar
+## Contract-Local Operation Grammar
 
 The macro's input grammar declares contract-local operation roots
 directly. The operation root is the caller's domain action; no
 universal Sema verb appears at this layer.
 
 ```rust
-legacy_signal_channel! {
-    channel Ledger {
+signal_channel! {
+    channel Ledger contract LedgerWire {
         operation Receive(HookNotification),
         operation Push(Push),
         operation Query(Query),
@@ -56,7 +54,7 @@ module path as the namespace.
   NOTA record-head uniqueness, and stream-block cross-references
   carry over unchanged.
 
-## Legacy Optional `observable` Block
+## Optional `observable` Block
 
 A channel can opt into an observer-subscription surface by declaring
 an `observable` block. When present the macro injects the
@@ -67,8 +65,8 @@ standardized `Tap(<Filter>) opens ObserverStream` /
 `publish_*` methods the daemon's executor calls.
 
 ```rust
-legacy_signal_channel! {
-    channel Spirit {
+signal_channel! {
+    channel Spirit contract SpiritWire {
         operation State(Statement),
         operation Record(Entry),
     }
@@ -132,7 +130,7 @@ small leaf utilities may omit it.)
   retired verb-tagged grammar, the retained structural checks
   (duplicate record heads, orphan streams, reverse event belongs
   mismatch, close-token type mismatch), and the observable block's
-  failure modes (missing filter, missing events, domain operation
+  failure modes (missing contract marker, missing filter, missing events, domain operation
   named `Tap` or `Untap`, duplicate block).
 
 The macro's responsibility is unchanged at the level of intent: take

@@ -8,7 +8,7 @@ pub struct EffectEmitted;
 // The observable block must open with `filter <Type>;` (or
 // `filter default;`); omitting the filter line is a compile error.
 signal_channel! {
-    channel Ledger {
+    channel Ledger contract TestContract {
         operation Record(Note),
     }
     reply LedgerReply {

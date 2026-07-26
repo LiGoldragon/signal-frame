@@ -48,18 +48,27 @@ impl ShortHeader {
 
     /// Construct the only supported unbound shape for explicit legacy parsing.
     pub const fn legacy_unbound(route: WireRoute) -> Self {
-        Self::bound(ContractBinding::legacy_unbound(), route)
+        Self(((route.variant().value() as u64) << 48) | ((route.root().value() as u64) << 56))
     }
 
     pub const fn value(self) -> u64 {
         self.0
     }
 
-    pub const fn binding(self) -> ContractBinding {
-        ContractBinding::new(
-            ContractId::from_header_bits(self.0 as u32),
-            WireRevision::from_header_bits((self.0 >> 32) as u16),
-        )
+    /// Read a non-legacy binding from this header.
+    ///
+    /// A zero prefix is represented only as [`FrameError::LegacyUnboundHeader`];
+    /// it never materializes a `ContractId` or `WireRevision`.
+    pub const fn binding(self) -> Result<ContractBinding, FrameError> {
+        let contract = match ContractId::try_new(self.0 as u32) {
+            Ok(contract) => contract,
+            Err(_) => return Err(FrameError::LegacyUnboundHeader),
+        };
+        let revision = match WireRevision::try_new((self.0 >> 32) as u16) {
+            Ok(revision) => revision,
+            Err(_) => return Err(FrameError::LegacyUnboundHeader),
+        };
+        Ok(ContractBinding::new(contract, revision))
     }
 
     pub const fn route(self) -> WireRoute {
@@ -70,7 +79,7 @@ impl ShortHeader {
     }
 
     pub const fn is_legacy_unbound(self) -> bool {
-        self.binding().is_legacy_unbound()
+        self.binding().is_err()
     }
 
     pub const fn to_le_bytes(self) -> [u8; SHORT_HEADER_BYTE_COUNT] {
@@ -124,14 +133,19 @@ pub enum StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload> {
     },
 }
 
+/// Explicit migration-only envelope for archives without a contract binding.
+///
+/// Production code must use [`BoundExchangeFrame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExchangeFrame<RequestPayload, ReplyPayload> {
+pub struct LegacyExchangeFrame<RequestPayload, ReplyPayload> {
     pub short_header: ShortHeader,
     pub body: ExchangeFrameBody<RequestPayload, ReplyPayload>,
 }
 
+/// Explicit migration-only streaming envelope for archives without a contract
+/// binding. Production code must use [`BoundStreamingFrame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StreamingFrame<RequestPayload, ReplyPayload, EventPayload> {
+pub struct LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload> {
     pub short_header: ShortHeader,
     pub body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
 }
@@ -139,18 +153,18 @@ pub struct StreamingFrame<RequestPayload, ReplyPayload, EventPayload> {
 /// Production exchange frame whose header binding is derived from `Contract`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundExchangeFrame<Contract, RequestPayload, ReplyPayload> {
-    inner: ExchangeFrame<RequestPayload, ReplyPayload>,
+    inner: LegacyExchangeFrame<RequestPayload, ReplyPayload>,
     contract: PhantomData<fn() -> Contract>,
 }
 
 /// Production streaming frame whose header binding is derived from `Contract`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundStreamingFrame<Contract, RequestPayload, ReplyPayload, EventPayload> {
-    inner: StreamingFrame<RequestPayload, ReplyPayload, EventPayload>,
+    inner: LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>,
     contract: PhantomData<fn() -> Contract>,
 }
 
-impl<RequestPayload, ReplyPayload> ExchangeFrame<RequestPayload, ReplyPayload> {
+impl<RequestPayload, ReplyPayload> LegacyExchangeFrame<RequestPayload, ReplyPayload> {
     pub fn new(body: ExchangeFrameBody<RequestPayload, ReplyPayload>) -> Self {
         Self::with_short_header(ShortHeader::empty(), body)
     }
@@ -176,7 +190,7 @@ impl<RequestPayload, ReplyPayload> ExchangeFrame<RequestPayload, ReplyPayload> {
 }
 
 impl<RequestPayload, ReplyPayload, EventPayload>
-    StreamingFrame<RequestPayload, ReplyPayload, EventPayload>
+    LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>
 {
     pub fn new(body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>) -> Self {
         Self::with_short_header(ShortHeader::empty(), body)
@@ -209,7 +223,7 @@ where
 {
     pub fn new(route: WireRoute, body: ExchangeFrameBody<RequestPayload, ReplyPayload>) -> Self {
         Self {
-            inner: ExchangeFrame::with_short_header(
+            inner: LegacyExchangeFrame::with_short_header(
                 ShortHeader::bound(Contract::BINDING, route),
                 body,
             ),
@@ -240,7 +254,7 @@ where
         body: StreamingFrameBody<RequestPayload, ReplyPayload, EventPayload>,
     ) -> Self {
         Self {
-            inner: StreamingFrame::with_short_header(
+            inner: LegacyStreamingFrame::with_short_header(
                 ShortHeader::bound(Contract::BINDING, route),
                 body,
             ),
@@ -353,7 +367,7 @@ impl ContractBinding {
     }
 }
 
-impl<RequestPayload, ReplyPayload> ExchangeFrame<RequestPayload, ReplyPayload>
+impl<RequestPayload, ReplyPayload> LegacyExchangeFrame<RequestPayload, ReplyPayload>
 where
     RequestPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
@@ -368,7 +382,7 @@ where
 }
 
 impl<RequestPayload, ReplyPayload, EventPayload>
-    StreamingFrame<RequestPayload, ReplyPayload, EventPayload>
+    LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>
 where
     RequestPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
@@ -416,7 +430,7 @@ where
     }
 }
 
-impl<RequestPayload, ReplyPayload> ExchangeFrame<RequestPayload, ReplyPayload>
+impl<RequestPayload, ReplyPayload> LegacyExchangeFrame<RequestPayload, ReplyPayload>
 where
     RequestPayload: Archive,
     ReplyPayload: Archive,
@@ -443,7 +457,7 @@ where
 }
 
 impl<RequestPayload, ReplyPayload, EventPayload>
-    StreamingFrame<RequestPayload, ReplyPayload, EventPayload>
+    LegacyStreamingFrame<RequestPayload, ReplyPayload, EventPayload>
 where
     RequestPayload: Archive,
     ReplyPayload: Archive,

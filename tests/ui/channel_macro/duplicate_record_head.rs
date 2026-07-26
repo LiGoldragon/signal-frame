@@ -11,7 +11,7 @@ mod second {
 pub struct Receipt;
 
 signal_channel! {
-    channel StatusChannel {
+    channel StatusChannel contract TestContract {
         operation First(first::Status),
         operation Second(second::Status),
     }

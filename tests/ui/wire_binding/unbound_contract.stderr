@@ -1,10 +1,11 @@
-error[E0624]: associated function `legacy_unbound` is private
+error[E0599]: no associated function or constant named `legacy_unbound` found for struct `ContractBinding` in the current scope
  --> tests/ui/wire_binding/unbound_contract.rs:6:55
   |
 6 |     const BINDING: ContractBinding = ContractBinding::legacy_unbound();
-  |                                                       ^^^^^^^^^^^^^^ private associated function
+  |                                                       ^^^^^^^^^^^^^^ associated function or constant not found in `ContractBinding`
   |
- ::: src/binding.rs
+note: if you're trying to build a new `ContractBinding`, consider using `ContractBinding::new` which returns `ContractBinding`
+ --> src/binding.rs
   |
-  |     pub(crate) const fn legacy_unbound() -> Self {
-  |     -------------------------------------------- private associated function defined here
+  |     pub const fn new(contract: ContractId, revision: WireRevision) -> Self {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

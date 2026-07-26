@@ -3,13 +3,27 @@
 use nota::{NotaDecode, NotaEncode, NotaSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence, NonEmpty,
-    ObservableSet, RequestPayload, RootCode, SessionEpoch, ShortHeader, StreamingFrame,
-    StreamingFrameBody, SubReply, VariantCode, WireRoute, signal_channel,
+    ContractBinding, ContractId, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence,
+    NonEmpty, ObservableSet, RequestPayload, RootCode, SessionEpoch, ShortHeader,
+    StreamingFrameBody, SubReply, VariantCode, WireContract, WireRevision, WireRoute,
+    signal_channel,
 };
+use std::num::{NonZeroU16, NonZeroU32};
 
-fn legacy_route(root: u8) -> ShortHeader {
-    ShortHeader::legacy_unbound(WireRoute::new(RootCode::new(root), VariantCode::new(0)))
+struct TestContract;
+
+impl WireContract for TestContract {
+    const BINDING: ContractBinding = ContractBinding::new(
+        ContractId::new(NonZeroU32::MIN),
+        WireRevision::new(NonZeroU16::MIN),
+    );
+}
+
+fn bound_header(root: u8) -> ShortHeader {
+    ShortHeader::bound(
+        TestContract::BINDING,
+        WireRoute::new(RootCode::new(root), VariantCode::new(0)),
+    )
 }
 
 #[derive(
@@ -56,7 +70,7 @@ mod message {
     use super::*;
 
     signal_channel! {
-        channel Message {
+        channel Message contract TestContract {
             operation Submit(Submission),
             operation Query(InboxQuery),
         }
@@ -71,7 +85,7 @@ mod meta_message {
     use super::*;
 
     signal_channel! {
-        channel MetaMessage {
+        channel MetaMessage contract TestContract {
             operation Configure(Submission),
             operation Drain(InboxQuery),
         }
@@ -86,7 +100,7 @@ mod unit_reply {
     use super::*;
 
     signal_channel! {
-        channel UnitReply {
+        channel UnitReply contract TestContract {
             operation Submit(Submission),
         }
         reply Reply {
@@ -137,6 +151,8 @@ fn block_on_ready<Output>(future: impl Future<Output = Output>) -> Output {
 enum MessageDispatchError {
     #[error(transparent)]
     Dispatch(#[from] signal_frame::OperationDispatchError),
+    #[error(transparent)]
+    Frame(#[from] signal_frame::FrameError),
 }
 
 #[derive(Default)]
@@ -199,12 +215,15 @@ fn macro_unit_reply_round_trips_as_bare_nota_atom() {
 
 #[test]
 fn macro_unit_reply_round_trips_through_binary_frame() {
-    let frame = unit_reply::Frame::new(ExchangeFrameBody::Reply {
-        exchange: fresh_exchange(),
-        reply: signal_frame::Reply::committed(NonEmpty::single(SubReply::Ok(
-            unit_reply::Reply::NotFound,
-        ))),
-    });
+    let frame = unit_reply::Frame::new(
+        WireRoute::new(RootCode::new(0), VariantCode::new(0)),
+        ExchangeFrameBody::Reply {
+            exchange: fresh_exchange(),
+            reply: signal_frame::Reply::committed(NonEmpty::single(SubReply::Ok(
+                unit_reply::Reply::NotFound,
+            ))),
+        },
+    );
 
     let bytes = frame.encode_length_prefixed().expect("encode unit reply");
     let decoded = unit_reply::Frame::decode_length_prefixed(&bytes).expect("decode unit reply");
@@ -239,13 +258,16 @@ fn macro_emits_log_variant_for_operation_short_headers() {
 
     assert_eq!(signal_frame::LogVariant::log_variant(&submit), 0);
     assert_eq!(signal_frame::LogVariant::log_variant(&query), 1);
-    assert_eq!(query.into_request().short_header(), legacy_route(1));
     assert_eq!(
-        MessageOperation::kind_from_short_header(legacy_route(1)),
+        query.into_request().route(),
+        WireRoute::new(RootCode::new(1), VariantCode::new(0))
+    );
+    assert_eq!(
+        MessageOperation::kind_from_short_header(bound_header(1)),
         Some(MessageOperationKind::Query)
     );
     assert_eq!(
-        MessageOperation::kind_from_short_header(legacy_route(99)),
+        MessageOperation::kind_from_short_header(bound_header(99)),
         None
     );
 }
@@ -257,7 +279,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
     let mut handler = MessageHandler::default();
 
     let reply = block_on_ready(handler.dispatch(
-        legacy_route(0),
+        bound_header(0),
         MessageOperation::Submit(Submission::new("hello")),
     ))
     .expect("dispatch");
@@ -266,7 +288,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
     assert_eq!(reply, MessageReply::Accepted(Receipt { accepted: true }));
 
     let mismatch = block_on_ready(handler.dispatch(
-        legacy_route(1),
+        bound_header(1),
         MessageOperation::Submit(Submission::new("wrong header")),
     ))
     .expect_err("mismatched short header is rejected");
@@ -281,7 +303,7 @@ fn macro_emits_operation_dispatch_handler_surface() {
     ));
 
     let unknown = block_on_ready(handler.dispatch(
-        legacy_route(99),
+        bound_header(99),
         MessageOperation::Submit(Submission::new("unknown header")),
     ))
     .expect_err("unknown short header is rejected");
@@ -315,14 +337,16 @@ fn signal_cli_macro_routes_heads_to_working_or_meta_socket() {
 fn macro_frame_alias_round_trips_with_generated_payloads() {
     let exchange = fresh_exchange();
     let request = MessageOperation::Submit(Submission::new("frame")).into_request();
-    let frame = MessageFrame::new(ExchangeFrameBody::Request {
-        exchange,
-        request: request.clone(),
-    });
+    let frame = MessageFrame::new(
+        request.route(),
+        ExchangeFrameBody::Request {
+            exchange,
+            request: request.clone(),
+        },
+    );
 
     let bytes = frame.encode_length_prefixed().expect("encode");
-    let decoded = ExchangeFrame::<MessageOperation, MessageReply>::decode_length_prefixed(&bytes)
-        .expect("decode");
+    let decoded = MessageFrame::decode_length_prefixed(&bytes).expect("decode");
 
     match decoded.into_body() {
         ExchangeFrameBody::Request {
@@ -375,7 +399,7 @@ mod terminal {
     use super::*;
 
     signal_channel! {
-        channel Terminal {
+        channel Terminal contract TestContract {
             operation Watch(WatchWorker) opens WorkerLifecycle,
             operation Stop(WorkerToken),
         }
@@ -397,7 +421,7 @@ mod terminal {
 
 use terminal::{
     Event as TerminalEvent, Frame as TerminalFrame, Operation as TerminalOperation,
-    Reply as TerminalReply, StreamKind as TerminalStreamKind,
+    StreamKind as TerminalStreamKind,
 };
 
 #[test]
@@ -426,18 +450,17 @@ fn macro_streaming_frame_alias_round_trips() {
         ExchangeLane::Acceptor,
         LaneSequence::first(),
     );
-    let frame = TerminalFrame::new(StreamingFrameBody::SubscriptionEvent {
-        event_identifier,
-        token: signal_frame::SubscriptionTokenInner::new(5),
-        event: TerminalEvent::Started(WorkerStarted { number: 5 }),
-    });
+    let frame = TerminalFrame::new(
+        WireRoute::new(RootCode::new(0), VariantCode::new(0)),
+        StreamingFrameBody::SubscriptionEvent {
+            event_identifier,
+            token: signal_frame::SubscriptionTokenInner::new(5),
+            event: TerminalEvent::Started(WorkerStarted { number: 5 }),
+        },
+    );
 
     let bytes = frame.encode_length_prefixed().expect("encode");
-    let decoded =
-        StreamingFrame::<TerminalOperation, TerminalReply, TerminalEvent>::decode_length_prefixed(
-            &bytes,
-        )
-        .expect("decode");
+    let decoded = TerminalFrame::decode_length_prefixed(&bytes).expect("decode");
 
     match decoded.into_body() {
         StreamingFrameBody::SubscriptionEvent {
@@ -512,7 +535,7 @@ mod ledger {
     use super::*;
 
     signal_channel! {
-        channel Ledger {
+        channel Ledger contract TestContract {
             operation Record(LedgerNote),
         }
         reply Reply {
@@ -537,7 +560,7 @@ mod domain_observe {
     use super::*;
 
     signal_channel! {
-        channel DomainObserve {
+        channel DomainObserve contract TestContract {
             operation Observe(Selection),
         }
         reply Reply {
@@ -778,7 +801,7 @@ mod audit {
     use super::*;
 
     signal_channel! {
-        channel Audit {
+        channel Audit contract TestContract {
             operation Probe(AuditProbe),
         }
         reply Reply {
@@ -881,16 +904,17 @@ fn observable_streaming_frame_alias_carries_observer_events() {
     let event = LedgerEvent::EffectEmitted(EffectEmitted {
         effect_label: "Assert".to_string(),
     });
-    let frame = LedgerFrame::new(StreamingFrameBody::SubscriptionEvent {
-        event_identifier,
-        token: signal_frame::SubscriptionTokenInner::new(11),
-        event: event.clone(),
-    });
+    let frame = LedgerFrame::new(
+        WireRoute::new(RootCode::new(0), VariantCode::new(0)),
+        StreamingFrameBody::SubscriptionEvent {
+            event_identifier,
+            token: signal_frame::SubscriptionTokenInner::new(11),
+            event: event.clone(),
+        },
+    );
 
     let bytes = frame.encode_length_prefixed().expect("encode");
-    let decoded =
-        StreamingFrame::<LedgerOperation, LedgerReply, LedgerEvent>::decode_length_prefixed(&bytes)
-            .expect("decode");
+    let decoded = LedgerFrame::decode_length_prefixed(&bytes).expect("decode");
 
     match decoded.into_body() {
         StreamingFrameBody::SubscriptionEvent {

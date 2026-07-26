@@ -13,9 +13,9 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
 use crate::{
-    Caller, ExchangeFrame, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence,
-    LogVariant, NonEmpty, Reply, Request, RequestPayload, SessionEpoch, SignalOperationHeads,
-    StreamingFrame, StreamingFrameBody, SubReply,
+    BoundExchangeFrame, BoundStreamingFrame, Caller, ExchangeFrameBody, ExchangeIdentifier,
+    ExchangeLane, LaneSequence, LogVariant, NonEmpty, Reply, Request, RequestPayload, SessionEpoch,
+    SignalOperationHeads, StreamingFrameBody, SubReply, WireContract,
 };
 
 type HighSerializer<'archive> = rkyv::api::high::HighSerializer<
@@ -463,8 +463,10 @@ pub trait ClientFrame: Sized {
     fn decode_client_frame(bytes: &[u8]) -> Result<Self, CommandLineError>;
 }
 
-impl<Operation, ReplyPayload> ClientFrame for ExchangeFrame<Operation, ReplyPayload>
+impl<Contract, Operation, ReplyPayload> ClientFrame
+    for BoundExchangeFrame<Contract, Operation, ReplyPayload>
 where
+    Contract: WireContract,
     Operation: Archive + Debug + LogVariant + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     <Operation as Archive>::Archived: for<'archive> rkyv::bytecheck::CheckBytes<
@@ -478,9 +480,8 @@ where
     type Reply = ReplyPayload;
 
     fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self {
-        let short_header = request.short_header();
-        Self::with_short_header(
-            short_header,
+        Self::new(
+            request.route(),
             ExchangeFrameBody::Request { exchange, request },
         )
     }
@@ -505,9 +506,10 @@ where
     }
 }
 
-impl<Operation, ReplyPayload, EventPayload> ClientFrame
-    for StreamingFrame<Operation, ReplyPayload, EventPayload>
+impl<Contract, Operation, ReplyPayload, EventPayload> ClientFrame
+    for BoundStreamingFrame<Contract, Operation, ReplyPayload, EventPayload>
 where
+    Contract: WireContract,
     Operation: Archive + Debug + LogVariant + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     ReplyPayload: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
     EventPayload: Archive + Debug + for<'archive> RkyvSerialize<HighSerializer<'archive>>,
@@ -525,9 +527,8 @@ where
     type Reply = ReplyPayload;
 
     fn request_frame(exchange: ExchangeIdentifier, request: Request<Self::Operation>) -> Self {
-        let short_header = request.short_header();
-        Self::with_short_header(
-            short_header,
+        Self::new(
+            request.route(),
             StreamingFrameBody::Request { exchange, request },
         )
     }

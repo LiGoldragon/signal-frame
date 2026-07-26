@@ -6,7 +6,7 @@ pub struct Opened;
 pub struct Event;
 
 signal_channel! {
-    channel Terminal {
+    channel Terminal contract TestContract {
         operation Watch(Watch),
         operation Stop(StopToken),
     }

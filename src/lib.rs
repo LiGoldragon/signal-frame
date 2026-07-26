@@ -55,8 +55,8 @@ pub use exchange::{
     StreamEventIdentifier,
 };
 pub use frame::{
-    BoundExchangeFrame, BoundStreamingFrame, ExchangeFrame, ExchangeFrameBody,
-    SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrame, StreamingFrameBody,
+    BoundExchangeFrame, BoundStreamingFrame, ExchangeFrameBody, LegacyExchangeFrame,
+    LegacyStreamingFrame, SHORT_HEADER_BYTE_COUNT, ShortHeader, StreamingFrameBody,
     short_header_from_archive, short_header_from_length_prefixed,
 };
 pub use identity::{Revision, Slot};
@@ -78,4 +78,4 @@ pub use version::{
 };
 
 pub use paste;
-pub use signal_frame_macros::{legacy_signal_channel, signal_channel};
+pub use signal_frame_macros::signal_channel;

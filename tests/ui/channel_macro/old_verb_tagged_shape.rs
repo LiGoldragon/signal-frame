@@ -4,7 +4,7 @@ pub struct Submission;
 pub struct Receipt;
 
 signal_channel! {
-    channel Message {
+    channel Message contract TestContract {
         Assert Submit(Submission),
     }
     reply MessageReply {

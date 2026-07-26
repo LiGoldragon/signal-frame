@@ -9,7 +9,7 @@ pub struct EffectEmitted;
 // Only one observable block per channel; duplicates are a compile
 // error.
 signal_channel! {
-    channel Ledger {
+    channel Ledger contract TestContract {
         operation Record(Note),
     }
     reply LedgerReply {

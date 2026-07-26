@@ -19,7 +19,6 @@ use thiserror::Error;
 
 use crate::WireRoute;
 use crate::caller::Caller;
-use crate::frame::ShortHeader;
 use crate::log_variant::LogVariant;
 use crate::non_empty::{NonEmpty, NonEmptyError};
 
@@ -79,15 +78,13 @@ impl<Payload> Request<Payload>
 where
     Payload: LogVariant,
 {
-    /// Project this request into the frame short header.
+    /// Project this request into its contract-local route.
     ///
     /// Multi-payload requests use the first operation as the Tier-1
     /// dispatch triage key. The full ordered payload sequence remains in
     /// the archived body.
-    pub fn short_header(&self) -> ShortHeader {
-        ShortHeader::legacy_unbound(WireRoute::from_log_variant(
-            self.payloads.head().log_variant(),
-        ))
+    pub fn route(&self) -> WireRoute {
+        WireRoute::from_log_variant(self.payloads.head().log_variant())
     }
 }
 

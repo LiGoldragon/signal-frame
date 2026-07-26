@@ -11,6 +11,7 @@ use crate::model::{
 
 mod keyword {
     syn::custom_keyword!(channel);
+    syn::custom_keyword!(contract);
     syn::custom_keyword!(operation);
     syn::custom_keyword!(reply);
     syn::custom_keyword!(event);
@@ -30,6 +31,8 @@ impl Parse for ChannelSpec {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         input.parse::<keyword::channel>()?;
         let name = input.parse::<Ident>()?;
+        input.parse::<keyword::contract>()?;
+        let contract = input.parse::<Type>()?;
 
         let operation_body;
         braced!(operation_body in input);
@@ -83,6 +86,7 @@ impl Parse for ChannelSpec {
 
         Ok(ChannelSpec {
             name,
+            contract,
             request,
             reply,
             event,

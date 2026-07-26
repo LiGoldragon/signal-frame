@@ -3,10 +3,10 @@ use std::mem::size_of;
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
-    BoundExchangeFrame, BoundStreamingFrame, ContractBinding, ContractId, ExchangeFrame,
-    ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRequest,
-    LaneSequence, RootCode, SessionEpoch, ShortHeader, StreamEventIdentifier, StreamingFrameBody,
-    SubscriptionTokenInner, VariantCode, WireContract, WireRevision, WireRoute,
+    BoundExchangeFrame, BoundStreamingFrame, ContractBinding, ContractId, ExchangeFrameBody,
+    ExchangeIdentifier, ExchangeLane, FrameError, HandshakeRequest, LaneSequence,
+    LegacyExchangeFrame, RootCode, SessionEpoch, ShortHeader, StreamEventIdentifier,
+    StreamingFrameBody, SubscriptionTokenInner, VariantCode, WireContract, WireRevision, WireRoute,
 };
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -18,26 +18,40 @@ struct ReplyPayload(u32);
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 struct EventPayload(u32);
 
+const fn contract_id(value: u32) -> ContractId {
+    match ContractId::try_new(value) {
+        Ok(value) => value,
+        Err(_) => panic!("test contract id must be nonzero"),
+    }
+}
+
+const fn wire_revision(value: u16) -> WireRevision {
+    match WireRevision::try_new(value) {
+        Ok(value) => value,
+        Err(_) => panic!("test wire revision must be nonzero"),
+    }
+}
+
 #[derive(Debug)]
 struct OrdinaryContract;
 
 impl WireContract for OrdinaryContract {
     const BINDING: ContractBinding =
-        ContractBinding::new(ContractId::new(0x1020_3040), WireRevision::new(7));
+        ContractBinding::new(contract_id(0x1020_3040), wire_revision(7));
 }
 
 struct OtherContract;
 
 impl WireContract for OtherContract {
     const BINDING: ContractBinding =
-        ContractBinding::new(ContractId::new(0x5060_7080), WireRevision::new(7));
+        ContractBinding::new(contract_id(0x5060_7080), wire_revision(7));
 }
 
 struct NewerOrdinaryContract;
 
 impl WireContract for NewerOrdinaryContract {
     const BINDING: ContractBinding =
-        ContractBinding::new(ContractId::new(0x1020_3040), WireRevision::new(8));
+        ContractBinding::new(contract_id(0x1020_3040), wire_revision(8));
 }
 
 const ROUTE: WireRoute = WireRoute::new(RootCode::new(0x91), VariantCode::new(0x2a));
@@ -76,13 +90,11 @@ fn short_header_pack_unpack_is_injective_at_boundaries_and_property_cases() {
         for revision in revisions {
             for root in roots {
                 for variant in variants {
-                    let binding = ContractBinding::new(
-                        ContractId::new(contract),
-                        WireRevision::new(revision),
-                    );
+                    let binding =
+                        ContractBinding::new(contract_id(contract), wire_revision(revision));
                     let route = WireRoute::new(RootCode::new(root), VariantCode::new(variant));
                     let header = ShortHeader::bound(binding, route);
-                    assert_eq!(header.binding(), binding);
+                    assert_eq!(header.binding(), Ok(binding));
                     assert_eq!(header.route(), route);
                     assert!(packed.insert(header.value()));
                 }
@@ -91,7 +103,7 @@ fn short_header_pack_unpack_is_injective_at_boundaries_and_property_cases() {
     }
 
     let boundary = ShortHeader::bound(
-        ContractBinding::new(ContractId::new(u32::MAX), WireRevision::new(u16::MAX)),
+        ContractBinding::new(contract_id(u32::MAX), wire_revision(u16::MAX)),
         WireRoute::new(RootCode::new(u8::MAX), VariantCode::new(u8::MAX)),
     );
     assert_eq!(boundary.value(), u64::MAX);
@@ -104,8 +116,7 @@ fn zero_is_reserved_and_legacy_unbound_is_explicit() {
 
     let legacy = ShortHeader::legacy_unbound(ROUTE);
     assert!(legacy.is_legacy_unbound());
-    assert!(legacy.binding().contract().is_legacy_unbound());
-    assert!(legacy.binding().revision().is_legacy_unbound());
+    assert_eq!(legacy.binding(), Err(FrameError::LegacyUnboundHeader));
     assert_eq!(
         OrdinaryContract::BINDING.validate_header(legacy),
         Err(FrameError::LegacyUnboundHeader)
@@ -181,7 +192,10 @@ fn bound_exchange_request_reply_and_control_preserve_identity() {
             request: signal_frame::Request::from_payload(RequestPayload(41)),
         },
     );
-    assert_eq!(request.short_header().binding(), OrdinaryContract::BINDING);
+    assert_eq!(
+        request.short_header().binding(),
+        Ok(OrdinaryContract::BINDING)
+    );
     let request_bytes = request.encode_length_prefixed().unwrap();
     let decoded_request =
         BoundExchangeFrame::<OrdinaryContract, RequestPayload, ReplyPayload>::decode_length_prefixed(
@@ -204,19 +218,25 @@ fn bound_exchange_request_reply_and_control_preserve_identity() {
             reply: signal_frame::Reply::rejected(signal_frame::RequestRejectionReason::Internal),
         },
     );
-    assert_eq!(reply.short_header().binding(), OrdinaryContract::BINDING);
+    assert_eq!(
+        reply.short_header().binding(),
+        Ok(OrdinaryContract::BINDING)
+    );
 
     let control = BoundExchangeFrame::<OrdinaryContract, RequestPayload, ReplyPayload>::new(
         ROUTE,
         ExchangeFrameBody::HandshakeRequest(HandshakeRequest::current()),
     );
-    assert_eq!(control.short_header().binding(), OrdinaryContract::BINDING);
+    assert_eq!(
+        control.short_header().binding(),
+        Ok(OrdinaryContract::BINDING)
+    );
 }
 
 #[test]
 fn binding_changes_only_the_header_not_the_archived_body() {
     let body = ExchangeFrameBody::HandshakeRequest(HandshakeRequest::current());
-    let legacy = ExchangeFrame::<RequestPayload, ReplyPayload>::new(body.clone());
+    let legacy = LegacyExchangeFrame::<RequestPayload, ReplyPayload>::new(body.clone());
     let bound =
         BoundExchangeFrame::<OrdinaryContract, RequestPayload, ReplyPayload>::new(ROUTE, body);
 
@@ -244,7 +264,10 @@ fn bound_stream_push_preserves_token_epoch_lane_sequence_and_binding() {
             },
         );
 
-    assert_eq!(frame.short_header().binding(), OrdinaryContract::BINDING);
+    assert_eq!(
+        frame.short_header().binding(),
+        Ok(OrdinaryContract::BINDING)
+    );
     let bytes = frame.encode_length_prefixed().unwrap();
     let decoded =
         BoundStreamingFrame::<OrdinaryContract, RequestPayload, ReplyPayload, EventPayload>::decode_length_prefixed(
@@ -270,7 +293,6 @@ fn primitive_and_archived_layouts_are_stable_widths() {
     assert_eq!(size_of::<RootCode>(), 1);
     assert_eq!(size_of::<VariantCode>(), 1);
     assert_eq!(size_of::<ShortHeader>(), 8);
-    assert_eq!(size_of::<rkyv::Archived<ContractId>>(), 4);
-    assert_eq!(size_of::<rkyv::Archived<WireRevision>>(), 2);
-    assert_eq!(size_of::<rkyv::Archived<ContractBinding>>(), 6);
+    // Binding values occur only in the external short-header prefix, not in
+    // rkyv bodies; intentionally no archive surface can deserialize zero.
 }

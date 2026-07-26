@@ -26,7 +26,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
 
     let request_payload_impl = emit_request_payload_impl(&augmented.request);
     let log_variant_impl = emit_log_variant_impl(&augmented);
-    let operation_dispatch = emit_operation_dispatch(&augmented.request, &augmented.reply);
+    let operation_dispatch = emit_operation_dispatch(&augmented);
     let request_kind = emit_request_kind(&augmented.request);
     let reply_kind = emit_reply_kind(&augmented.reply);
     let event_kind = augmented.event.as_ref().map(emit_event_kind);
@@ -151,6 +151,7 @@ fn augment_with_observable(spec: &ChannelSpec) -> ChannelSpec {
 
     ChannelSpec {
         name: spec.name.clone(),
+        contract: spec.contract.clone(),
         request: RequestBlockSpec {
             name: spec.request.name.clone(),
             variants: request_variants,
@@ -179,6 +180,7 @@ fn filter_ident_for(_spec: &ChannelSpec, observable: &ObservableBlockSpec) -> sy
 fn clone_channel_spec(spec: &ChannelSpec) -> ChannelSpec {
     ChannelSpec {
         name: spec.name.clone(),
+        contract: spec.contract.clone(),
         request: RequestBlockSpec {
             name: spec.request.name.clone(),
             variants: clone_request_variants(&spec.request.variants),
@@ -370,7 +372,10 @@ fn emit_log_variant_impl(spec: &ChannelSpec) -> TokenStream {
     }
 }
 
-fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -> TokenStream {
+fn emit_operation_dispatch(spec: &ChannelSpec) -> TokenStream {
+    let request = &spec.request;
+    let reply = &spec.reply;
+    let contract = &spec.contract;
     let request_name = &request.name;
     let reply_name = &reply.name;
     let handler_trait_name = format_ident!("{}Handler", request_name);
@@ -411,7 +416,8 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
         #[allow(async_fn_in_trait)]
         pub trait #dispatch_trait_name: #handler_trait_name
         where
-            Self::Error: From<::signal_frame::OperationDispatchError>,
+            Self::Error: From<::signal_frame::OperationDispatchError>
+                + From<::signal_frame::FrameError>,
         {
             async fn dispatch_operation(
                 &mut self,
@@ -427,6 +433,9 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
                 short_header: ::signal_frame::ShortHeader,
                 operation: #request_name,
             ) -> ::std::result::Result<#reply_name, Self::Error> {
+                <#contract as ::signal_frame::WireContract>::BINDING
+                    .validate_header(short_header)
+                    .map_err(|error| <Self::Error as ::core::convert::From<::signal_frame::FrameError>>::from(error))?;
                 let expected = short_header.route().root().value();
                 let Some(expected_kind) = #request_name::kind_from_short_header(short_header) else {
                     return Err(::signal_frame::OperationDispatchError::UnknownOperationRoot {
@@ -449,7 +458,8 @@ fn emit_operation_dispatch(request: &RequestBlockSpec, reply: &ReplyBlockSpec) -
         impl<Handler> #dispatch_trait_name for Handler
         where
             Handler: #handler_trait_name,
-            Handler::Error: From<::signal_frame::OperationDispatchError>,
+            Handler::Error: From<::signal_frame::OperationDispatchError>
+                + From<::signal_frame::FrameError>,
         {
         }
     }
@@ -694,6 +704,7 @@ fn emit_frame_aliases(spec: &ChannelSpec) -> TokenStream {
     let channel_request_alias = format_ident!("Request");
     let channel_reply_alias = format_ident!("ReplyEnvelope");
     let channel_builder_alias = format_ident!("RequestBuilder");
+    let contract = &spec.contract;
 
     if spec.is_streaming() {
         let event_name = &spec
@@ -703,7 +714,7 @@ fn emit_frame_aliases(spec: &ChannelSpec) -> TokenStream {
             .name;
         quote! {
             pub type #frame_alias =
-                ::signal_frame::StreamingFrame<#request_name, #reply_name, #event_name>;
+                ::signal_frame::BoundStreamingFrame<#contract, #request_name, #reply_name, #event_name>;
             pub type #frame_body_alias =
                 ::signal_frame::StreamingFrameBody<#request_name, #reply_name, #event_name>;
             pub type #channel_request_alias = ::signal_frame::Request<#request_name>;
@@ -713,7 +724,7 @@ fn emit_frame_aliases(spec: &ChannelSpec) -> TokenStream {
     } else {
         quote! {
             pub type #frame_alias =
-                ::signal_frame::ExchangeFrame<#request_name, #reply_name>;
+                ::signal_frame::BoundExchangeFrame<#contract, #request_name, #reply_name>;
             pub type #frame_body_alias =
                 ::signal_frame::ExchangeFrameBody<#request_name, #reply_name>;
             pub type #channel_request_alias = ::signal_frame::Request<#request_name>;
@@ -732,8 +743,8 @@ fn emit_frame_builders(spec: &ChannelSpec) -> TokenStream {
                 exchange: ::signal_frame::ExchangeIdentifier,
             ) -> Frame {
                 let request = ::signal_frame::Request::from_payload(self);
-                let short_header = request.short_header();
-                Frame::with_short_header(short_header, FrameBody::Request { exchange, request })
+                let route = request.route();
+                Frame::new(route, FrameBody::Request { exchange, request })
             }
         }
     }

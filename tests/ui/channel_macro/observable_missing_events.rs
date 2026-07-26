@@ -9,7 +9,7 @@ pub struct Acknowledgement;
 // emits `publish_operation_received` and `publish_effect_emitted`
 // over these two event roles.)
 signal_channel! {
-    channel Ledger {
+    channel Ledger contract TestContract {
         operation Record(Note),
     }
     reply LedgerReply {

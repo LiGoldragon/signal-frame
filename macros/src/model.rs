@@ -7,6 +7,9 @@ use syn::{Ident, Type};
 #[derive(Clone)]
 pub(crate) struct ChannelSpec {
     pub(crate) name: Ident,
+    /// The contract marker fixes every generated production frame to one
+    /// `WireContract`; callers never supply a binding per frame.
+    pub(crate) contract: Type,
     pub(crate) request: RequestBlockSpec,
     pub(crate) reply: ReplyBlockSpec,
     pub(crate) event: Option<EventBlockSpec>,

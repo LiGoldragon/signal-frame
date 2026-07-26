@@ -54,3 +54,21 @@ fn nota_text_feature_adds_nota() {
         "nota-text feature must add nota:\n{tree}"
     );
 }
+
+#[test]
+fn generated_production_path_has_no_unbound_escape_hatch() {
+    let emit = include_str!("../macros/src/emit.rs");
+    let client = include_str!("../src/command_line.rs");
+
+    for source in [emit, client] {
+        assert!(
+            !source.contains("legacy_unbound"),
+            "generated production path must not create legacy-unbound headers"
+        );
+        assert!(
+            !source.contains("::signal_frame::ExchangeFrame<")
+                && !source.contains("::signal_frame::StreamingFrame<"),
+            "generated production path must not use generic legacy frame aliases"
+        );
+    }
+}

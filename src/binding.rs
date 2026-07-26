@@ -1,4 +1,4 @@
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use std::num::{NonZeroU16, NonZeroU32};
 use thiserror::Error;
 
 use crate::error::FrameError;
@@ -8,48 +8,23 @@ use crate::error::FrameError;
 /// Zero is reserved for explicitly parsed legacy frames. Production
 /// contracts construct IDs through [`ContractId::new`].
 #[repr(transparent)]
-#[derive(
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
-pub struct ContractId(u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContractId(NonZeroU32);
 
 impl ContractId {
-    pub const fn new(value: u32) -> Self {
-        assert!(
-            value != 0,
-            "contract id zero is reserved for legacy parsing"
-        );
+    pub const fn new(value: NonZeroU32) -> Self {
         Self(value)
     }
 
     pub const fn try_new(value: u32) -> Result<Self, BindingIdentifierError> {
-        if value == 0 {
-            Err(BindingIdentifierError::ReservedLegacyContractId)
-        } else {
-            Ok(Self(value))
+        match NonZeroU32::new(value) {
+            Some(value) => Ok(Self(value)),
+            None => Err(BindingIdentifierError::ReservedLegacyContractId),
         }
     }
 
-    pub(crate) const fn from_header_bits(value: u32) -> Self {
-        Self(value)
-    }
-
     pub const fn value(self) -> u32 {
-        self.0
-    }
-
-    pub const fn is_legacy_unbound(self) -> bool {
-        self.0 == 0
+        self.0.get()
     }
 }
 
@@ -58,65 +33,28 @@ impl ContractId {
 /// Zero is reserved for explicitly parsed legacy frames. Production
 /// contracts construct revisions through [`WireRevision::new`].
 #[repr(transparent)]
-#[derive(
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
-pub struct WireRevision(u16);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WireRevision(NonZeroU16);
 
 impl WireRevision {
-    pub const fn new(value: u16) -> Self {
-        assert!(
-            value != 0,
-            "wire revision zero is reserved for legacy parsing"
-        );
+    pub const fn new(value: NonZeroU16) -> Self {
         Self(value)
     }
 
     pub const fn try_new(value: u16) -> Result<Self, BindingIdentifierError> {
-        if value == 0 {
-            Err(BindingIdentifierError::ReservedLegacyWireRevision)
-        } else {
-            Ok(Self(value))
+        match NonZeroU16::new(value) {
+            Some(value) => Ok(Self(value)),
+            None => Err(BindingIdentifierError::ReservedLegacyWireRevision),
         }
     }
 
-    pub(crate) const fn from_header_bits(value: u16) -> Self {
-        Self(value)
-    }
-
     pub const fn value(self) -> u16 {
-        self.0
-    }
-
-    pub const fn is_legacy_unbound(self) -> bool {
-        self.0 == 0
+        self.0.get()
     }
 }
 
 /// Contract identity paired with the exact archived-body revision it accepts.
-#[derive(
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ContractBinding {
     contract: ContractId,
     revision: WireRevision,
@@ -127,14 +65,6 @@ impl ContractBinding {
         Self { contract, revision }
     }
 
-    /// The reserved binding recovered only while parsing an explicit legacy header.
-    pub(crate) const fn legacy_unbound() -> Self {
-        Self {
-            contract: ContractId::from_header_bits(0),
-            revision: WireRevision::from_header_bits(0),
-        }
-    }
-
     pub const fn contract(self) -> ContractId {
         self.contract
     }
@@ -143,15 +73,8 @@ impl ContractBinding {
         self.revision
     }
 
-    pub const fn is_legacy_unbound(self) -> bool {
-        self.contract.is_legacy_unbound() || self.revision.is_legacy_unbound()
-    }
-
     pub fn validate_header(self, header: crate::ShortHeader) -> Result<(), FrameError> {
-        let found = header.binding();
-        if found.is_legacy_unbound() {
-            return Err(FrameError::LegacyUnboundHeader);
-        }
+        let found = header.binding()?;
         if found.contract != self.contract {
             return Err(FrameError::ContractMismatch {
                 expected: self.contract,
@@ -171,19 +94,7 @@ impl ContractBinding {
 
 /// Route root byte. Its meaning remains local to the bound contract.
 #[repr(transparent)]
-#[derive(
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RootCode(u8);
 
 impl RootCode {
@@ -198,19 +109,7 @@ impl RootCode {
 
 /// Route variant byte. Its meaning remains local to the bound contract.
 #[repr(transparent)]
-#[derive(
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VariantCode(u8);
 
 impl VariantCode {
@@ -224,19 +123,7 @@ impl VariantCode {
 }
 
 /// Contract-local route carried in the high sixteen bits of a short header.
-#[derive(
-    Archive,
-    RkyvSerialize,
-    RkyvDeserialize,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WireRoute {
     root: RootCode,
     variant: VariantCode,
