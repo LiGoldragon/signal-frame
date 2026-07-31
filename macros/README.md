@@ -33,7 +33,7 @@ signal_channel! {
 
 The macro emits the same outputs (contract-local operation enum,
 `Frame` alias, `Request` / `RequestBuilder` aliases over the payload
-enum, reply conversion impls, kind enums, NOTA codecs) without any
+enum, reply conversion impls, kind enums, DOTOS codecs) without any
 verb-tagging machinery. Emitted names are intentionally unprefixed:
 `Operation`, `Reply`, `Event`, `Frame`, `FrameBody`, `Request`,
 `ReplyEnvelope`, and `RequestBuilder`. If a crate declares multiple
@@ -51,7 +51,7 @@ module path as the namespace.
   verb name. `Subscribe`, when a contract uses that word, is just a
   contract-local operation like any other.
 - The macro's `validate.rs` checks on variant uniqueness, projected
-  NOTA record-head uniqueness, and stream-block cross-references
+  DOTOS record-head uniqueness, and stream-block cross-references
   carry over unchanged.
 
 ## Optional `observable` Block
@@ -121,7 +121,7 @@ small leaf utilities may omit it.)
 ## Validation witnesses
 
 - `tests/channel_macro.rs` proves a positive non-streaming channel,
-  a streaming channel, generated kind methods, frame aliases, NOTA
+  a streaming channel, generated kind methods, frame aliases, DOTOS
   round trips, and the observable surface: macro-mandated `Tap` /
   `Untap` injection, stream witnesses, reply variant round-trips,
   the observer-set's filter-routing behaviour, and the
@@ -135,6 +135,6 @@ small leaf utilities may omit it.)
 
 The macro's responsibility is unchanged at the level of intent: take
 one channel declaration and emit the typed request/reply/event
-vocabulary, frame aliases, stream-relation witnesses, and the NOTA
+vocabulary, frame aliases, stream-relation witnesses, and the DOTOS
 codec on the payload layer. Only the input grammar and the
 verb-tagging output change.

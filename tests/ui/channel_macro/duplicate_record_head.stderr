@@ -1,4 +1,4 @@
-error: duplicate NOTA record head `Status` in request block — also used by variant `First`
+error: duplicate DOTOS record head `Status` in request block — also used by variant `First`
   --> tests/ui/channel_macro/duplicate_record_head.rs:16:19
    |
 16 |         operation Second(second::Status),

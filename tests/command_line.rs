@@ -1,4 +1,4 @@
-#![cfg(feature = "nota-text")]
+#![cfg(feature = "dotos-text")]
 
 use std::{
     io::{Read, Write},
@@ -8,7 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use nota::{NotaDecode, NotaEncode};
+use dotos::{DotosDecode, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ClientShape, CommandLineError, CommandLineSocket, CommandLineSockets, ContractBinding,
@@ -31,7 +31,7 @@ mod working {
     use super::*;
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
     )]
     pub struct Submission {
         body: String,
@@ -44,14 +44,14 @@ mod working {
     }
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
     )]
     pub struct Query {
         selection: String,
     }
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
     )]
     pub struct Accepted {
         ok: bool,
@@ -78,12 +78,12 @@ mod meta {
     use super::*;
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
     )]
     pub struct Drain {}
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
     )]
     pub struct Drained {}
 
@@ -97,8 +97,8 @@ mod meta {
     }
 }
 
-fn encode_to_text<T: NotaEncode>(value: &T) -> String {
-    value.to_nota()
+fn encode_to_text<T: DotosEncode>(value: &T) -> String {
+    value.to_dotos()
 }
 
 fn socket_path(name: &str) -> PathBuf {

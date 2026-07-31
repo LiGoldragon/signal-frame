@@ -1,6 +1,6 @@
 //! Code emission. Generates the typed payload enums, kind enums,
 //! `RequestPayload` impl, frame aliases, stream-relation witnesses,
-//! and NOTA codec impls. When the channel declaration carries an
+//! and DOTOS codec impls. When the channel declaration carries an
 //! `observable` block, also injects observer-subscription operations,
 //! an `ObserverStream`, and the runtime publish surface.
 
@@ -39,7 +39,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
 
     let frame_aliases = emit_frame_aliases(&augmented);
     let frame_builders = emit_frame_builders(&augmented);
-    let nota_codecs = emit_nota_codecs(&augmented);
+    let dotos_codecs = emit_dotos_codecs(&augmented);
 
     quote! {
         #request_enum
@@ -54,7 +54,7 @@ pub(crate) fn emit(spec: &ChannelSpec) -> TokenStream {
         #stream_kind
         #frame_aliases
         #frame_builders
-        #nota_codecs
+        #dotos_codecs
         #observable_runtime
     }
 }
@@ -514,7 +514,7 @@ fn emit_request_kind(block: &RequestBlockSpec) -> TokenStream {
         }
     });
     quote! {
-        #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
+        #[cfg_attr(feature = "dotos-text", derive(::dotos::DotosEncode, ::dotos::DotosDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
@@ -573,7 +573,7 @@ fn emit_reply_kind(block: &ReplyBlockSpec) -> TokenStream {
         }
     });
     quote! {
-        #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
+        #[cfg_attr(feature = "dotos-text", derive(::dotos::DotosEncode, ::dotos::DotosDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
@@ -611,7 +611,7 @@ fn emit_event_kind(block: &EventBlockSpec) -> TokenStream {
         quote! { Self::#variant(_) => #kind_name::#variant }
     });
     quote! {
-        #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
+        #[cfg_attr(feature = "dotos-text", derive(::dotos::DotosEncode, ::dotos::DotosDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
@@ -683,7 +683,7 @@ fn emit_stream_kind_and_witnesses(spec: &ChannelSpec) -> TokenStream {
     };
 
     quote! {
-        #[cfg_attr(feature = "nota-text", derive(::nota::NotaEncode, ::nota::NotaDecode))]
+        #[cfg_attr(feature = "dotos-text", derive(::dotos::DotosEncode, ::dotos::DotosDecode))]
         #[derive(
             ::rkyv::Archive,
             ::rkyv::Serialize,
@@ -773,7 +773,7 @@ fn emit_frame_builders(spec: &ChannelSpec) -> TokenStream {
     }
 }
 
-fn emit_nota_codecs(spec: &ChannelSpec) -> TokenStream {
+fn emit_dotos_codecs(spec: &ChannelSpec) -> TokenStream {
     let request_codec = emit_payload_enum_codec(&spec.request.name, payload_kinds(&spec.request));
     let reply_codec = emit_payload_enum_codec(&spec.reply.name, payload_kinds_reply(&spec.reply));
     let event_codec = spec
@@ -834,9 +834,9 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
         match k.payload {
             Some(payload) => quote! {
                 Self::#variant(payload) => {
-                    ::nota::Delimiter::Parenthesis.wrap([
+                    ::dotos::Delimiter::Parenthesis.wrap([
                         #variant_string.to_owned(),
-                        <#payload as ::nota::NotaEncode>::to_nota(payload),
+                        <#payload as ::dotos::DotosEncode>::to_dotos(payload),
                     ])
                 }
             },
@@ -851,7 +851,7 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
         let payload = k.payload?;
         Some(quote! {
             #variant_string => {
-                let payload = <#payload as ::nota::NotaDecode>::from_nota_block(
+                let payload = <#payload as ::dotos::DotosDecode>::from_dotos_block(
                     &children[1],
                 )?;
                 Ok(Self::#variant(payload))
@@ -868,43 +868,43 @@ fn emit_payload_enum_codec(name: &syn::Ident, kinds: Vec<PayloadKind<'_>>) -> To
         })
     });
     quote! {
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaEncode for #name {
-            fn to_nota(&self) -> String {
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosEncode for #name {
+            fn to_dotos(&self) -> String {
                 match self {
                     #( #encode_arms, )*
                 }
             }
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaDecode for #name {
-            fn from_nota_block(
-                block: &::nota::Block,
-            ) -> Result<Self, ::nota::NotaDecodeError> {
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosDecode for #name {
+            fn from_dotos_block(
+                block: &::dotos::Block,
+            ) -> Result<Self, ::dotos::DotosDecodeError> {
                 if let Some(head) = block.demote_to_string() {
                     return match head {
                         #( #decode_unit_arms, )*
-                        other => Err(::nota::NotaDecodeError::UnknownVariant {
+                        other => Err(::dotos::DotosDecodeError::UnknownVariant {
                             enum_name: #enum_name_string,
                             variant: other.to_string(),
                         }),
                     };
                 }
 
-                let children = ::nota::NotaBlock::new(block).expect_children(
-                    ::nota::Delimiter::Parenthesis,
+                let children = ::dotos::DotosBlock::new(block).expect_children(
+                    ::dotos::Delimiter::Parenthesis,
                     #enum_name_string,
                     2,
                 )?;
                 let head = children[0]
                     .demote_to_string()
-                    .ok_or(::nota::NotaDecodeError::ExpectedAtom {
+                    .ok_or(::dotos::DotosDecodeError::ExpectedAtom {
                         type_name: #enum_name_string,
                     })?;
                 match head {
                     #( #decode_payload_arms, )*
-                    other => Err(::nota::NotaDecodeError::UnknownVariant {
+                    other => Err(::dotos::DotosDecodeError::UnknownVariant {
                         enum_name: #enum_name_string,
                         variant: other.to_string(),
                     }),
@@ -958,7 +958,7 @@ fn emit_observable_runtime(
         /// Subscription token issued by the observer set when a
         /// caller subscribes via the channel's `Tap` verb. Wraps the
         /// frame-layer `SubscriptionTokenInner`; the typed newtype
-        /// prevents cross-channel token confusion. The NOTA record
+        /// prevents cross-channel token confusion. The DOTOS record
         /// head is the uniform `ObserverSubscriptionToken` -- Rust
         /// scopes the type by channel, the wire vocabulary stays
         /// uniform.
@@ -985,38 +985,38 @@ fn emit_observable_runtime(
             }
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaEncode for #token_type_name {
-            fn to_nota(&self) -> String {
-                ::nota::Delimiter::Parenthesis.wrap([
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosEncode for #token_type_name {
+            fn to_dotos(&self) -> String {
+                ::dotos::Delimiter::Parenthesis.wrap([
                     "ObserverSubscriptionToken".to_owned(),
-                    self.0.value().to_nota(),
+                    self.0.value().to_dotos(),
                 ])
             }
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaDecode for #token_type_name {
-            fn from_nota_block(
-                block: &::nota::Block,
-            ) -> Result<Self, ::nota::NotaDecodeError> {
-                let children = ::nota::NotaBlock::new(block).expect_children(
-                    ::nota::Delimiter::Parenthesis,
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosDecode for #token_type_name {
+            fn from_dotos_block(
+                block: &::dotos::Block,
+            ) -> Result<Self, ::dotos::DotosDecodeError> {
+                let children = ::dotos::DotosBlock::new(block).expect_children(
+                    ::dotos::Delimiter::Parenthesis,
                     "ObserverSubscriptionToken",
                     2,
                 )?;
                 let head = children[0]
                     .demote_to_string()
-                    .ok_or(::nota::NotaDecodeError::ExpectedAtom {
+                    .ok_or(::dotos::DotosDecodeError::ExpectedAtom {
                         type_name: "ObserverSubscriptionToken",
                     })?;
                 if head != "ObserverSubscriptionToken" {
-                    return Err(::nota::NotaDecodeError::UnknownVariant {
+                    return Err(::dotos::DotosDecodeError::UnknownVariant {
                         enum_name: "ObserverSubscriptionToken",
                         variant: head.to_owned(),
                     });
                 }
-                let value = u64::from_nota_block(&children[1])?;
+                let value = u64::from_dotos_block(&children[1])?;
                 Ok(Self(::signal_frame::SubscriptionTokenInner::new(value)))
             }
         }
@@ -1044,38 +1044,38 @@ fn emit_observable_runtime(
             }
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaEncode for #opened_type_name {
-            fn to_nota(&self) -> String {
-                ::nota::Delimiter::Parenthesis.wrap([
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosEncode for #opened_type_name {
+            fn to_dotos(&self) -> String {
+                ::dotos::Delimiter::Parenthesis.wrap([
                     "ObserverSubscriptionOpened".to_owned(),
-                    self.token.to_nota(),
+                    self.token.to_dotos(),
                 ])
             }
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaDecode for #opened_type_name {
-            fn from_nota_block(
-                block: &::nota::Block,
-            ) -> Result<Self, ::nota::NotaDecodeError> {
-                let children = ::nota::NotaBlock::new(block).expect_children(
-                    ::nota::Delimiter::Parenthesis,
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosDecode for #opened_type_name {
+            fn from_dotos_block(
+                block: &::dotos::Block,
+            ) -> Result<Self, ::dotos::DotosDecodeError> {
+                let children = ::dotos::DotosBlock::new(block).expect_children(
+                    ::dotos::Delimiter::Parenthesis,
                     "ObserverSubscriptionOpened",
                     2,
                 )?;
                 let head = children[0]
                     .demote_to_string()
-                    .ok_or(::nota::NotaDecodeError::ExpectedAtom {
+                    .ok_or(::dotos::DotosDecodeError::ExpectedAtom {
                         type_name: "ObserverSubscriptionOpened",
                     })?;
                 if head != "ObserverSubscriptionOpened" {
-                    return Err(::nota::NotaDecodeError::UnknownVariant {
+                    return Err(::dotos::DotosDecodeError::UnknownVariant {
                         enum_name: "ObserverSubscriptionOpened",
                         variant: head.to_owned(),
                     });
                 }
-                let token = #token_type_name::from_nota_block(&children[1])?;
+                let token = #token_type_name::from_dotos_block(&children[1])?;
                 Ok(Self { token })
             }
         }
@@ -1253,7 +1253,7 @@ fn emit_default_filter(
     // Vec<OperationKind> }` plus `OnlyEvents { event_kinds }`.
     // The mechanically-clean default landed first is role-based only
     // (operations-vs-effects); per-kind filtering requires extending
-    // the `OperationKind` enum with rkyv + NOTA derives so it
+    // the `OperationKind` enum with rkyv + DOTOS derives so it
     // can ride the wire, which is a separate refactor. Contracts that
     // need per-kind filtering today use `filter <CustomType>;` and
     // write the impl themselves.
@@ -1290,9 +1290,9 @@ fn emit_default_filter(
             EffectsOnly,
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaEncode for #filter_type {
-            fn to_nota(&self) -> String {
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosEncode for #filter_type {
+            fn to_dotos(&self) -> String {
                 match self {
                     Self::All => "All".to_owned(),
                     Self::OperationsOnly => "OperationsOnly".to_owned(),
@@ -1301,21 +1301,21 @@ fn emit_default_filter(
             }
         }
 
-        #[cfg(feature = "nota-text")]
-        impl ::nota::NotaDecode for #filter_type {
-            fn from_nota_block(
-                block: &::nota::Block,
-            ) -> Result<Self, ::nota::NotaDecodeError> {
+        #[cfg(feature = "dotos-text")]
+        impl ::dotos::DotosDecode for #filter_type {
+            fn from_dotos_block(
+                block: &::dotos::Block,
+            ) -> Result<Self, ::dotos::DotosDecodeError> {
                 let head = block
                     .demote_to_string()
-                    .ok_or(::nota::NotaDecodeError::ExpectedAtom {
+                    .ok_or(::dotos::DotosDecodeError::ExpectedAtom {
                         type_name: stringify!(#filter_type),
                     })?;
                 match head {
                     "All" => Ok(Self::All),
                     "OperationsOnly" => Ok(Self::OperationsOnly),
                     "EffectsOnly" => Ok(Self::EffectsOnly),
-                    other => Err(::nota::NotaDecodeError::UnknownVariant {
+                    other => Err(::dotos::DotosDecodeError::UnknownVariant {
                         enum_name: stringify!(#filter_type),
                         variant: other.to_string(),
                     }),

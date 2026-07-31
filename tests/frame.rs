@@ -1,5 +1,5 @@
-#[cfg(feature = "nota-text")]
-use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode, NotaSource};
+#[cfg(feature = "dotos-text")]
+use dotos::{Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode, DotosSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     AcceptedOutcome, BatchErrorClassification, BatchFailureReason, BoundExchangeFrame,
@@ -535,7 +535,7 @@ fn streaming_frame_short_header_round_trips_and_is_peekable() {
     assert_eq!(decoded.body(), frame.body());
 }
 
-// ─── Request NOTA witnesses under the contract-local shape ───
+// ─── Request DOTOS witnesses under the contract-local shape ───
 //
 // Under the contract-local-verb architecture, `Request<Payload>`
 // holds payloads directly — no outer verb wrapper, no per-operation
@@ -543,135 +543,135 @@ fn streaming_frame_short_header_round_trips_and_is_peekable() {
 // `signal_channel!` macro) emits its own record head naming the
 // contract-local verb.
 
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
-struct NotaSubmit {
+struct DotosSubmit {
     text: String,
 }
 
-#[cfg(feature = "nota-text")]
-impl RequestPayload for NotaSubmit {}
+#[cfg(feature = "dotos-text")]
+impl RequestPayload for DotosSubmit {}
 
-#[cfg(feature = "nota-text")]
-impl NotaEncode for NotaSubmit {
-    fn to_nota(&self) -> String {
-        Delimiter::Parenthesis.wrap(["Submit".to_owned(), self.text.to_nota()])
+#[cfg(feature = "dotos-text")]
+impl DotosEncode for DotosSubmit {
+    fn to_dotos(&self) -> String {
+        Delimiter::Parenthesis.wrap(["Submit".to_owned(), self.text.to_dotos()])
     }
 }
 
-#[cfg(feature = "nota-text")]
-impl NotaDecode for NotaSubmit {
-    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+#[cfg(feature = "dotos-text")]
+impl DotosDecode for DotosSubmit {
+    fn from_dotos_block(block: &Block) -> Result<Self, DotosDecodeError> {
         let children =
-            NotaBlock::new(block).expect_children(Delimiter::Parenthesis, "Submit", 2)?;
+            DotosBlock::new(block).expect_children(Delimiter::Parenthesis, "Submit", 2)?;
         let head = children[0]
             .demote_to_string()
-            .ok_or(NotaDecodeError::ExpectedAtom {
+            .ok_or(DotosDecodeError::ExpectedAtom {
                 type_name: "Submit",
             })?;
         if head != "Submit" {
-            return Err(NotaDecodeError::UnknownVariant {
-                enum_name: "NotaSubmit",
+            return Err(DotosDecodeError::UnknownVariant {
+                enum_name: "DotosSubmit",
                 variant: head.to_owned(),
             });
         }
-        let text = String::from_nota_block(&children[1])?;
+        let text = String::from_dotos_block(&children[1])?;
         Ok(Self { text })
     }
 }
 
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
-struct NotaInbox {
+struct DotosInbox {
     name: String,
 }
 
-#[cfg(feature = "nota-text")]
-impl RequestPayload for NotaInbox {}
+#[cfg(feature = "dotos-text")]
+impl RequestPayload for DotosInbox {}
 
-#[cfg(feature = "nota-text")]
-impl NotaEncode for NotaInbox {
-    fn to_nota(&self) -> String {
-        Delimiter::Parenthesis.wrap(["Inbox".to_owned(), self.name.to_nota()])
+#[cfg(feature = "dotos-text")]
+impl DotosEncode for DotosInbox {
+    fn to_dotos(&self) -> String {
+        Delimiter::Parenthesis.wrap(["Inbox".to_owned(), self.name.to_dotos()])
     }
 }
 
-#[cfg(feature = "nota-text")]
-impl NotaDecode for NotaInbox {
-    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
-        let children = NotaBlock::new(block).expect_children(Delimiter::Parenthesis, "Inbox", 2)?;
+#[cfg(feature = "dotos-text")]
+impl DotosDecode for DotosInbox {
+    fn from_dotos_block(block: &Block) -> Result<Self, DotosDecodeError> {
+        let children = DotosBlock::new(block).expect_children(Delimiter::Parenthesis, "Inbox", 2)?;
         let head = children[0]
             .demote_to_string()
-            .ok_or(NotaDecodeError::ExpectedAtom { type_name: "Inbox" })?;
+            .ok_or(DotosDecodeError::ExpectedAtom { type_name: "Inbox" })?;
         if head != "Inbox" {
-            return Err(NotaDecodeError::UnknownVariant {
-                enum_name: "NotaInbox",
+            return Err(DotosDecodeError::UnknownVariant {
+                enum_name: "DotosInbox",
                 variant: head.to_owned(),
             });
         }
-        let name = String::from_nota_block(&children[1])?;
+        let name = String::from_dotos_block(&children[1])?;
         Ok(Self { name })
     }
 }
 
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
-enum NotaChannelRequest {
-    Submit(NotaSubmit),
-    Inbox(NotaInbox),
+enum DotosChannelRequest {
+    Submit(DotosSubmit),
+    Inbox(DotosInbox),
 }
 
-#[cfg(feature = "nota-text")]
-impl RequestPayload for NotaChannelRequest {}
+#[cfg(feature = "dotos-text")]
+impl RequestPayload for DotosChannelRequest {}
 
-#[cfg(feature = "nota-text")]
-impl NotaEncode for NotaChannelRequest {
-    fn to_nota(&self) -> String {
+#[cfg(feature = "dotos-text")]
+impl DotosEncode for DotosChannelRequest {
+    fn to_dotos(&self) -> String {
         match self {
-            Self::Submit(payload) => payload.to_nota(),
-            Self::Inbox(payload) => payload.to_nota(),
+            Self::Submit(payload) => payload.to_dotos(),
+            Self::Inbox(payload) => payload.to_dotos(),
         }
     }
 }
 
-#[cfg(feature = "nota-text")]
-impl NotaDecode for NotaChannelRequest {
-    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
-        let children = NotaBlock::new(block).expect_children(
+#[cfg(feature = "dotos-text")]
+impl DotosDecode for DotosChannelRequest {
+    fn from_dotos_block(block: &Block) -> Result<Self, DotosDecodeError> {
+        let children = DotosBlock::new(block).expect_children(
             Delimiter::Parenthesis,
-            "NotaChannelRequest",
+            "DotosChannelRequest",
             2,
         )?;
         let head = children[0]
             .demote_to_string()
-            .ok_or(NotaDecodeError::ExpectedAtom {
-                type_name: "NotaChannelRequest",
+            .ok_or(DotosDecodeError::ExpectedAtom {
+                type_name: "DotosChannelRequest",
             })?;
         match head {
-            "Submit" => Ok(Self::Submit(NotaSubmit::from_nota_block(block)?)),
-            "Inbox" => Ok(Self::Inbox(NotaInbox::from_nota_block(block)?)),
-            other => Err(NotaDecodeError::UnknownVariant {
-                enum_name: "NotaChannelRequest",
+            "Submit" => Ok(Self::Submit(DotosSubmit::from_dotos_block(block)?)),
+            "Inbox" => Ok(Self::Inbox(DotosInbox::from_dotos_block(block)?)),
+            other => Err(DotosDecodeError::UnknownVariant {
+                enum_name: "DotosChannelRequest",
                 variant: other.to_string(),
             }),
         }
     }
 }
 
-#[cfg(feature = "nota-text")]
-fn encode_to_text<T: NotaEncode>(value: &T) -> String {
-    value.to_nota()
+#[cfg(feature = "dotos-text")]
+fn encode_to_text<T: DotosEncode>(value: &T) -> String {
+    value.to_dotos()
 }
 
-#[cfg(feature = "nota-text")]
-fn decode_request_from_text(text: &str) -> Result<Request<NotaChannelRequest>, NotaDecodeError> {
-    NotaSource::new(text).parse::<Request<NotaChannelRequest>>()
+#[cfg(feature = "dotos-text")]
+fn decode_request_from_text(text: &str) -> Result<Request<DotosChannelRequest>, DotosDecodeError> {
+    DotosSource::new(text).parse::<Request<DotosChannelRequest>>()
 }
 
 #[test]
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 fn single_op_request_round_trips_without_outer_verb_wrapper() {
-    let payload = NotaChannelRequest::Submit(NotaSubmit {
+    let payload = DotosChannelRequest::Submit(DotosSubmit {
         text: "hello".into(),
     });
     let request = payload.into_request();
@@ -687,11 +687,11 @@ fn single_op_request_round_trips_without_outer_verb_wrapper() {
 }
 
 #[test]
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 fn multi_op_request_round_trips_through_sequence() {
     let request = Request::from_payloads(NonEmpty::from_head_and_tail(
-        NotaChannelRequest::Submit(NotaSubmit { text: "one".into() }),
-        vec![NotaChannelRequest::Inbox(NotaInbox {
+        DotosChannelRequest::Submit(DotosSubmit { text: "one".into() }),
+        vec![DotosChannelRequest::Inbox(DotosInbox {
             name: "operator".into(),
         })],
     ));

@@ -28,29 +28,29 @@ impl Manifest {
 }
 
 #[test]
-fn default_binary_kernel_does_not_depend_on_nota() {
+fn default_binary_kernel_does_not_depend_on_dotos() {
     let manifest = Manifest::from_environment();
     let tree = manifest.cargo_tree(&["--edges", "normal", "--no-default-features"]);
 
     assert!(
-        !tree.contains("nota") && !tree.contains("nota"),
-        "default binary signal-frame tree must not contain nota:\n{tree}"
+        !tree.contains("dotos") && !tree.contains("dotos"),
+        "default binary signal-frame tree must not contain dotos:\n{tree}"
     );
 }
 
 #[test]
-fn nota_text_feature_adds_nota() {
+fn dotos_text_feature_adds_dotos() {
     let manifest = Manifest::from_environment();
     let tree = manifest.cargo_tree(&[
         "--edges",
         "normal",
         "--no-default-features",
         "--features",
-        "nota-text",
+        "dotos-text",
     ]);
 
     assert!(
-        tree.contains("nota"),
-        "nota-text feature must add nota:\n{tree}"
+        tree.contains("dotos"),
+        "dotos-text feature must add dotos:\n{tree}"
     );
 }

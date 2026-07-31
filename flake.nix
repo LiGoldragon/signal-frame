@@ -42,9 +42,9 @@
           default = craneLib.cargoTest (commonArgs // {
             inherit cargoArtifacts;
           });
-          test-nota-text = craneLib.cargoTest (commonArgs // {
+          test-dotos-text = craneLib.cargoTest (commonArgs // {
             inherit cargoArtifacts;
-            cargoTestExtraArgs = "--all-targets --features nota-text";
+            cargoTestExtraArgs = "--all-targets --features dotos-text";
           });
           fmt = craneLib.cargoFmt {
             inherit src;
@@ -53,9 +53,9 @@
             inherit cargoArtifacts;
             cargoClippyExtraArgs = "--all-targets -- -D warnings";
           });
-          clippy-nota-text = craneLib.cargoClippy (commonArgs // {
+          clippy-dotos-text = craneLib.cargoClippy (commonArgs // {
             inherit cargoArtifacts;
-            cargoClippyExtraArgs = "--all-targets --features nota-text -- -D warnings";
+            cargoClippyExtraArgs = "--all-targets --features dotos-text -- -D warnings";
           });
 
           old-schema-composer-removed = pkgs.runCommand

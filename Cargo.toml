@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name         = "signal-frame"
-version      = "0.4.0"
+version      = "0.3.0"
 edition      = "2024"
 rust-version = "1.85"
 license      = "MIT OR Apache-2.0"
@@ -18,17 +18,17 @@ path = "src/lib.rs"
 
 [features]
 default = []
-nota-text = ["dep:nota"]
+dotos-text = ["dep:dotos"]
 
 [dependencies]
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", rev = "89dc3c85a9ff96d4e4d53accfd867df672cae5a8", optional = true }
+dotos = { package = "dotos", git = "https://github.com/LiGoldragon/dotos.git", rev = "1facca44fbcb", optional = true }
 paste = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 signal-frame-macros = { version = "0.1", path = "macros" }
 thiserror = "2"
 
 [dev-dependencies]
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", rev = "89dc3c85a9ff96d4e4d53accfd867df672cae5a8" }
+dotos = { package = "dotos", git = "https://github.com/LiGoldragon/dotos.git", rev = "1facca44fbcb" }
 trybuild = "1"
 
 [lints.rust]

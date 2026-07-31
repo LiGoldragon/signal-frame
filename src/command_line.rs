@@ -8,7 +8,7 @@ use std::{
     process::ExitCode,
 };
 
-use nota::{Block, Delimiter, Document, NotaDecode, NotaEncode, NotaSource};
+use dotos::{Block, Delimiter, Document, DotosDecode, DotosEncode, DotosSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
@@ -41,10 +41,10 @@ pub enum CommandLineRouteError {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum SingleArgumentError {
-    #[error("{program} expects exactly one NOTA or signal-file argument, found {found}")]
+    #[error("{program} expects exactly one DOTOS or signal-file argument, found {found}")]
     WrongArgumentCount { program: String, found: usize },
 
-    #[error("{program} accepts NOTA or signal-file input, not flag-style argument {argument}")]
+    #[error("{program} accepts DOTOS or signal-file input, not flag-style argument {argument}")]
     FlagArgument { program: String, argument: String },
 }
 
@@ -454,10 +454,10 @@ impl<Operation> RequestText<Operation> {
 
 impl<Operation> RequestText<Operation>
 where
-    Operation: NotaDecode,
+    Operation: DotosDecode,
 {
     pub fn decode_request(&self) -> Result<Request<Operation>, CommandLineError> {
-        NotaSource::new(&self.text)
+        DotosSource::new(&self.text)
             .parse::<Request<Operation>>()
             .map_err(CommandLineError::invalid_request)
     }
@@ -629,10 +629,10 @@ impl<Working, Meta> ClientShape<Working, Meta>
 where
     Working: ClientFrame,
     Meta: ClientFrame,
-    Working::Operation: SignalOperationHeads + RequestPayload + NotaDecode,
-    Meta::Operation: SignalOperationHeads + RequestPayload + NotaDecode,
-    Working::Reply: NotaEncode + Debug,
-    Meta::Reply: NotaEncode + Debug,
+    Working::Operation: SignalOperationHeads + RequestPayload + DotosDecode,
+    Meta::Operation: SignalOperationHeads + RequestPayload + DotosDecode,
+    Working::Reply: DotosEncode + Debug,
+    Meta::Reply: DotosEncode + Debug,
 {
     pub fn run_from_environment(binary_name: &str) -> ExitCode {
         match Self::from_binary_name(binary_name).run_environment() {
@@ -769,12 +769,12 @@ where
         replies: &NonEmpty<ReplyPayload>,
     ) -> Result<String, CommandLineError>
     where
-        ReplyPayload: NotaEncode,
+        ReplyPayload: DotosEncode,
     {
         if replies.tail().is_empty() {
-            Ok(replies.head().to_nota())
+            Ok(replies.head().to_dotos())
         } else {
-            Ok(Delimiter::SquareBracket.wrap(replies.iter().map(ReplyPayload::to_nota)))
+            Ok(Delimiter::SquareBracket.wrap(replies.iter().map(ReplyPayload::to_dotos)))
         }
     }
 

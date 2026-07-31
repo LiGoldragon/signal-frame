@@ -1,6 +1,6 @@
-#![cfg(feature = "nota-text")]
+#![cfg(feature = "dotos-text")]
 
-use nota::{NotaDecode, NotaEncode, NotaSource};
+use dotos::{DotosDecode, DotosEncode, DotosSource};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     ContractBinding, ContractId, ExchangeFrameBody, ExchangeIdentifier, ExchangeLane, LaneSequence,
@@ -19,7 +19,7 @@ impl WireContract for TestContract {
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct Submission {
     body: String,
@@ -32,7 +32,7 @@ impl Submission {
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct InboxQuery {
     name: String,
@@ -45,14 +45,14 @@ impl InboxQuery {
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct Receipt {
     accepted: bool,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct Inbox {
     count: u64,
@@ -125,8 +125,8 @@ fn fresh_exchange() -> ExchangeIdentifier {
     )
 }
 
-fn encode_to_text<T: NotaEncode>(value: &T) -> String {
-    value.to_nota()
+fn encode_to_text<T: DotosEncode>(value: &T) -> String {
+    value.to_dotos()
 }
 
 fn block_on_ready<Output>(future: impl Future<Output = Output>) -> Output {
@@ -203,19 +203,19 @@ fn macro_request_text_round_trips_through_contract_local_heads() {
 
     assert_eq!(text, "[(Submit {first}) (Query {operator})]");
 
-    let decoded = NotaSource::new(&text)
+    let decoded = DotosSource::new(&text)
         .parse::<signal_frame::Request<MessageOperation>>()
         .expect("decode");
     assert_eq!(decoded, request);
 }
 
 #[test]
-fn macro_unit_reply_round_trips_as_bare_nota_atom() {
+fn macro_unit_reply_round_trips_as_bare_dotos_atom() {
     let reply = unit_reply::Reply::NotFound;
     assert_eq!(reply.kind(), unit_reply::ReplyKind::NotFound);
-    assert_eq!(reply.to_nota(), "NotFound");
+    assert_eq!(reply.to_dotos(), "NotFound");
 
-    let decoded = NotaSource::new("NotFound")
+    let decoded = DotosSource::new("NotFound")
         .parse::<unit_reply::Reply>()
         .expect("decode bare unit reply");
     assert_eq!(decoded, reply);
@@ -395,35 +395,35 @@ fn macro_frame_alias_round_trips_with_generated_payloads() {
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct WatchWorker {
     name: String,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct WorkerToken {
     number: u64,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct WorkerOpened {
     number: u64,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct WorkerStopped {
     number: u64,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct WorkerStarted {
     number: u64,
@@ -526,7 +526,7 @@ fn macro_generated_reply_works_with_positioned_subreply() {
 // the contract author implements against its own filter type.
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub enum LedgerObserverFilter {
     All,
@@ -535,28 +535,28 @@ pub enum LedgerObserverFilter {
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct LedgerNote {
     body: String,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct LedgerAcknowledgement {
     accepted: bool,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct OperationReceived {
     operation_kind: String,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct EffectEmitted {
     effect_label: String,
@@ -581,7 +581,7 @@ mod ledger {
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct Selection {
     name: String,
@@ -697,12 +697,12 @@ fn observable_block_injects_reply_variant_with_freshly_minted_token() {
 }
 
 #[test]
-fn observable_round_trips_tap_and_untap_through_nota() {
+fn observable_round_trips_tap_and_untap_through_dotos() {
     let tap_request = LedgerOperation::Tap(LedgerObserverFilter::OnlyOperations).into_request();
     let tap_text = encode_to_text(&tap_request);
     assert_eq!(tap_text, "(Tap OnlyOperations)");
 
-    let decoded = NotaSource::new(&tap_text)
+    let decoded = DotosSource::new(&tap_text)
         .parse::<signal_frame::Request<LedgerOperation>>()
         .expect("decode tap");
     assert_eq!(decoded, tap_request);
@@ -712,7 +712,7 @@ fn observable_round_trips_tap_and_untap_through_nota() {
     let untap_text = encode_to_text(&untap_request);
     assert_eq!(untap_text, "(Untap (ObserverSubscriptionToken 9))");
 
-    let decoded_untap = NotaSource::new(&untap_text)
+    let decoded_untap = DotosSource::new(&untap_text)
         .parse::<signal_frame::Request<LedgerOperation>>()
         .expect("decode untap");
     assert_eq!(decoded_untap, untap_request);
@@ -730,7 +730,7 @@ fn observable_round_trips_observer_subscription_opened_reply() {
         "(ObserverSubscriptionOpened (ObserverSubscriptionOpened (ObserverSubscriptionToken 3)))"
     );
 
-    let decoded = NotaSource::new(&text)
+    let decoded = DotosSource::new(&text)
         .parse::<LedgerReply>()
         .expect("decode opened");
     assert_eq!(decoded, reply_payload);
@@ -745,8 +745,8 @@ fn observable_round_trips_operation_received_event() {
     let text = encode_to_text(&event);
     // Outer variant records the macro-injected `OperationReceived`
     // wire head; the inner record head comes from the contract
-    // author's NotaEncode, NotaDecode-derived struct of the same name.
-    let decoded = NotaSource::new(&text)
+    // author's DotosEncode, DotosDecode-derived struct of the same name.
+    let decoded = DotosSource::new(&text)
         .parse::<LedgerEvent>()
         .expect("decode event");
     assert_eq!(decoded, event);
@@ -801,28 +801,28 @@ fn observable_observer_set_routes_events_to_matching_observers() {
 // `filter <CustomType>;` and write the impl themselves.
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct AuditOperationReceived {
     label: String,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct AuditEffectEmitted {
     label: String,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct AuditProbe {
     target: String,
 }
 
 #[derive(
-    Archive, RkyvSerialize, RkyvDeserialize, NotaEncode, NotaDecode, Debug, Clone, PartialEq, Eq,
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]
 pub struct AuditProbed {
     accepted: bool,
@@ -890,7 +890,7 @@ fn observable_filter_default_wire_round_trips_through_tap_request() {
         let tap = AuditOperation::Tap(filter).into_request();
         let text = encode_to_text(&tap);
 
-        let decoded = NotaSource::new(&text)
+        let decoded = DotosSource::new(&text)
             .parse::<signal_frame::Request<AuditOperation>>()
             .expect("default filter round-trips through Tap request");
         assert_eq!(decoded, tap);

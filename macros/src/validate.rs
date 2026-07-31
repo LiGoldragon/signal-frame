@@ -26,7 +26,7 @@ pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
 /// `Untap` rename their domain verb — the observability verbs are
 /// fixed so `persona-introspect` sees a uniform vocabulary across
 /// every observable channel (per psyche affirmation
-/// 2026-05-20T02:00Z, recorded in `intent/component-shape.nota`).
+/// 2026-05-20T02:00Z, recorded in `intent/component-shape.dotos`).
 fn validate_observable_does_not_collide(spec: &ChannelSpec) -> syn::Result<()> {
     let Some(observable) = &spec.observable else {
         return Ok(());
@@ -161,7 +161,7 @@ fn validate_variant_uniqueness(spec: &ChannelSpec) -> syn::Result<()> {
 }
 
 fn validate_record_head_uniqueness(spec: &ChannelSpec) -> syn::Result<()> {
-    // The NOTA decoder dispatches by record head, not by Rust type
+    // The DOTOS decoder dispatches by record head, not by Rust type
     // path. `domain_a::Status` and `domain_b::Status` both project to
     // `(Status ...)`, so they collide inside the same payload enum.
     flag_duplicate_record_heads(
@@ -202,7 +202,7 @@ fn flag_duplicate_record_heads<'spec>(
             return Err(Error::new_spanned(
                 name,
                 format!(
-                    "duplicate NOTA record head `{head}` in {block_kind} block — also used by variant `{}`",
+                    "duplicate DOTOS record head `{head}` in {block_kind} block — also used by variant `{}`",
                     prior,
                 ),
             ));

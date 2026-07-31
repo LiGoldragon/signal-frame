@@ -40,7 +40,7 @@ executor lowering, logging, introspection).
 
 ## 0.5 · Direction
 
-The frame kernel is domain-free and verb-free at the universal layer. Per-component contract crates depend on it and supply their own contract-local operation roots in domain-verb form; `signal-frame` adds no domain meaning. `signal_channel!` follows the same boundary: generated frame types are binary by default; NOTA derives and manual NOTA impls are gated under the consuming crate's `nota-text` feature so production daemons depend on `signal-frame` without a NOTA parser.
+The frame kernel is domain-free and verb-free at the universal layer. Per-component contract crates depend on it and supply their own contract-local operation roots in domain-verb form; `signal-frame` adds no domain meaning. `signal_channel!` follows the same boundary: generated frame types are binary by default; DOTOS derives and manual DOTOS impls are gated under the consuming crate's `dotos-text` feature so production daemons depend on `signal-frame` without a DOTOS parser.
 
 The ordinary/meta split is a contract/rebuild boundary, not an engine split. Both `signal-<component>` and `meta-signal-<component>` contracts depend on the same frame kernel; the split is enforced by which crate a caller depends on, not by frame-layer machinery.
 
@@ -84,14 +84,14 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   ordered payload unit inside `Request`.
 - `Request<Payload>` carrying `NonEmpty<Payload>` as the ordered
   exchange unit plus optional advisory `Caller` context, with
-  feature-gated NOTA codec (single payload + bracketed sequence). Each
-  payload is itself a contract operation; the payload's NOTA record head
+  feature-gated DOTOS codec (single payload + bracketed sequence). Each
+  payload is itself a contract operation; the payload's DOTOS record head
   names the contract-local verb. No per-operation wrapper appears — the
   previous `Operation<Payload>` transparent wrapper has been collapsed
-  out. The NOTA projection intentionally carries only payloads; `Caller`
+  out. The DOTOS projection intentionally carries only payloads; `Caller`
   is injected by thin CLIs at the frame boundary. The codec exists only
-  under `nota-text`, so daemon default dependency trees keep the binary
-  frame kernel without a NOTA parser.
+  under `dotos-text`, so daemon default dependency trees keep the binary
+  frame kernel without a DOTOS parser.
 - `Caller`, `CallerIdentity`, `ProcessIdentifier`, `ExecutablePath`, and
   `ProcessStartTime` — best-effort caller context captured or supplied by
   a component CLI. `CallerIdentity` is the component-facing claimed caller
@@ -137,14 +137,14 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   The macro also emits the structurally obvious `From<Payload> for
   Reply` impls so contract crates do not hand-write conversion
   stacks.
-- Under the `nota-text` feature: `SingleArgument`,
+- Under the `dotos-text` feature: `SingleArgument`,
   `SignalOperationHeads`, `CommandLineRouteTable`,
   `CommandLineSockets`, `CommandLineDispatch`, `ClientShape`, and
   `signal_cli!` — the shared thin-CLI frame client. It enforces the
-  single-argument rule, parses the argument as NOTA text or a file path,
+  single-argument rule, parses the argument as DOTOS text or a file path,
   dispatches request heads to ordinary vs meta sockets, injects
   `Caller::from_kernel()`, sends length-prefixed frames, and renders the
-  typed reply payload back to NOTA through `nota`. Component crates still own their
+  typed reply payload back to DOTOS through `dotos`. Component crates still own their
   domain records, socket deployment paths, daemon behavior, and
   authorization policy.
 
@@ -166,7 +166,7 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   decisions.
 - Slot allocation, slot dereference, or revision bump behavior.
   Those belong to the Sema engine.
-- Nexus text parsing or rendering over NOTA syntax beyond the codec
+- Nexus text parsing or rendering over DOTOS syntax beyond the codec
   impls already in this crate.
 
 ## 3 · Constraints
@@ -192,14 +192,14 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   channels. The engine is a proc-macro living in the sibling
   `signal-frame-macros` crate; `signal-frame` re-exports it as
   `pub use signal_frame_macros::signal_channel`. Macro-generated
-  binary frame types are always emitted; macro-generated NOTA derives
-  and manual NOTA impls are gated under the consuming crate's
-  `nota-text` feature.
+  binary frame types are always emitted; macro-generated DOTOS derives
+  and manual DOTOS impls are gated under the consuming crate's
+  `dotos-text` feature.
 - `Slot<T>` and `Revision` are wire identity records only. The Sema
   engine owns allocation, lookup, compare-and-set, and persistence.
-- Text rendering/parsing of NOTA records belongs to the NOTA /
-  Nexus projection layers. `signal-frame` exposes `nota` only
-  through `nota-text` for its own thin-CLI and frame-kernel text
+- Text rendering/parsing of DOTOS records belongs to the DOTOS /
+  Nexus projection layers. `signal-frame` exposes `dotos` only
+  through `dotos-text` for its own thin-CLI and frame-kernel text
   projections; the default binary kernel does not carry a text codec.
 
 ## 4 · Invariants
@@ -209,7 +209,7 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   order and aligns replies positionally. Database atomicity belongs
   to `signal-sema` / `sema-engine` or to a contract that explicitly
   promises it.
-- rkyv is the Rust-to-Rust wire. Nexus text in NOTA syntax is a
+- rkyv is the Rust-to-Rust wire. Nexus text in DOTOS syntax is a
   human projection outside this crate.
 - Every incoming archive is bytechecked before deserialization.
 - `ExchangeFrameBody` / `StreamingFrameBody` carry handshake /
@@ -218,8 +218,8 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   not carry an authority proof.
 - Domain payloads remain typed. `signal-frame` does not become a
   generic record bag.
-- `Caller` is not part of the human NOTA request text. CLI-generated
-  requests may carry it in the binary frame; decoded NOTA requests and
+- `Caller` is not part of the human DOTOS request text. CLI-generated
+  requests may carry it in the binary frame; decoded DOTOS requests and
   programmatic constructors default it to `None`.
 - `Reply` is a typed sum (`Accepted` vs `Rejected`); pre-execution
   rejection cannot carry per-operation results, and accepted replies
@@ -410,7 +410,7 @@ redirection. The split:
   `PatternField<T>` — moved to `signal-sema`.
 - `Operation::verb` and `RequestPayload::signal_verb()` — removed.
   Each payload is itself a contract operation now; the payload's
-  NOTA record head names the contract-local verb. The transparent
+  DOTOS record head names the contract-local verb. The transparent
   `Operation<Payload>` wrapper has since been collapsed out too — a
   `Request<Payload>` is now `NonEmpty<Payload>` directly. Per-op
   metadata, if a contract ever needs it, goes in the payload type,
@@ -446,7 +446,7 @@ src/identity.rs       typed Slot<T> + Revision wire identities
 src/caller.rs         advisory parent-process context used by generated
                       thin CLIs
 src/request.rs        Request<Payload>, RequestPayload, RequestBuilder<Payload>;
-                      Request NOTA codec (single payload + bracketed sequence)
+                      Request DOTOS codec (single payload + bracketed sequence)
 src/reply.rs          Reply<ReplyPayload> (Accepted / Rejected),
                       AcceptedOutcome, SubReply, OperationFailureReason,
                       BatchErrorClassification
@@ -460,13 +460,13 @@ src/command_line.rs   thin-CLI argument, route table, socket client,
 src/frame.rs          BoundExchangeFrame / ExchangeFrameBody,
                       BoundStreamingFrame / StreamingFrameBody,
                       length-prefix helpers
-tests/frame.rs        rkyv round-trip + NOTA round-trip tests
+tests/frame.rs        rkyv round-trip + DOTOS round-trip tests
 tests/channel_macro.rs
-                      nota-text macro witnesses for non-streaming and
+                      dotos-text macro witnesses for non-streaming and
                       streaming channels
 tests/channel_macro_binary.rs
                       default-mode witness that signal_channel! emits a
-                      binary frame surface without requiring nota
+                      binary frame surface without requiring dotos
 tests/ui/channel_macro/
                       compile-fail macro witnesses
 

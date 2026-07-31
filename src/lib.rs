@@ -21,7 +21,7 @@
 
 pub mod binding;
 pub mod caller;
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 pub mod command_line;
 pub mod error;
 pub mod exchange;
@@ -43,7 +43,7 @@ pub use binding::{
     WireRevision, WireRoute, WireRouteError,
 };
 pub use caller::{Caller, CallerIdentity, ExecutablePath, ProcessIdentifier, ProcessStartTime};
-#[cfg(feature = "nota-text")]
+#[cfg(feature = "dotos-text")]
 pub use command_line::{
     ClientFrame, ClientShape, CommandLineDispatch, CommandLineError, CommandLineRouteError,
     CommandLineRouteTable, CommandLineSocket, CommandLineSockets, RequestHead, RequestInput,

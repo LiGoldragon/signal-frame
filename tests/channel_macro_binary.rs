@@ -1,4 +1,4 @@
-#![cfg(not(feature = "nota-text"))]
+#![cfg(not(feature = "dotos-text"))]
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
@@ -37,7 +37,7 @@ signal_channel! {
 }
 
 #[test]
-fn signal_channel_macro_does_not_require_nota_text_in_default_build() {
+fn signal_channel_macro_does_not_require_dotos_text_in_default_build() {
     let operation = Operation::Ping(Ping { sequence: 7 });
     let frame = Frame::new(
         operation.clone().into_request().route().unwrap(),

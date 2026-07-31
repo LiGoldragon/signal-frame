@@ -4,7 +4,7 @@
 //! `SignalVerb` tag has been removed; with it, the previous
 //! `Operation<Payload>` wrapper has also been collapsed out. A request
 //! is directly a `NonEmpty<Payload>` — each payload is itself a
-//! contract operation, and the payload's NOTA record head names the
+//! contract operation, and the payload's DOTOS record head names the
 //! contract-local verb.
 //!
 //! `RequestPayload` is a marker trait. Channel-specific structural
@@ -12,8 +12,8 @@
 //! daemon executor or to payload constructors — not to a kernel
 //! validation function that lies about doing work.
 
-#[cfg(feature = "nota-text")]
-use nota::{Block, Delimiter, NotaDecode, NotaDecodeError, NotaEncode};
+#[cfg(feature = "dotos-text")]
+use dotos::{Block, Delimiter, DotosDecode, DotosDecodeError, DotosEncode};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use thiserror::Error;
 
@@ -132,43 +132,43 @@ pub enum RequestBuilderError {
     EmptyRequest,
 }
 
-/// NOTA codec: a length-1 `Request` encodes as its single payload
+/// DOTOS codec: a length-1 `Request` encodes as its single payload
 /// directly (the payload's own record head names the contract-local
 /// verb); a length-N request encodes as a bracketed sequence
 /// `[(Verb ...) (Verb ...) ...]`. Decode peeks the next token — `[`
 /// means sequence, anything else means single payload.
-#[cfg(feature = "nota-text")]
-impl<Payload> NotaEncode for Request<Payload>
+#[cfg(feature = "dotos-text")]
+impl<Payload> DotosEncode for Request<Payload>
 where
-    Payload: NotaEncode,
+    Payload: DotosEncode,
 {
-    fn to_nota(&self) -> String {
+    fn to_dotos(&self) -> String {
         if self.payloads.tail().is_empty() {
-            self.payloads.head().to_nota()
+            self.payloads.head().to_dotos()
         } else {
-            Delimiter::SquareBracket.wrap(self.payloads.iter().map(Payload::to_nota))
+            Delimiter::SquareBracket.wrap(self.payloads.iter().map(Payload::to_dotos))
         }
     }
 }
 
-#[cfg(feature = "nota-text")]
-impl<Payload> NotaDecode for Request<Payload>
+#[cfg(feature = "dotos-text")]
+impl<Payload> DotosDecode for Request<Payload>
 where
-    Payload: NotaDecode,
+    Payload: DotosDecode,
 {
-    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+    fn from_dotos_block(block: &Block) -> Result<Self, DotosDecodeError> {
         match block.as_delimited(Delimiter::SquareBracket) {
             Some(sequence) => {
                 let payloads = sequence
                     .iter()
-                    .map(Payload::from_nota_block)
+                    .map(Payload::from_dotos_block)
                     .collect::<Result<Vec<_>, _>>()?;
                 match NonEmpty::try_from_vec(payloads) {
                     Ok(payloads) => Ok(Request {
                         caller: None,
                         payloads,
                     }),
-                    Err(NonEmptyError::Empty) => Err(NotaDecodeError::ExpectedRootCount {
+                    Err(NonEmptyError::Empty) => Err(DotosDecodeError::ExpectedRootCount {
                         type_name: "Request",
                         expected: 1,
                         found: 0,
@@ -176,7 +176,7 @@ where
                 }
             }
             None => {
-                let payload = Payload::from_nota_block(block)?;
+                let payload = Payload::from_dotos_block(block)?;
                 Ok(Request {
                     caller: None,
                     payloads: NonEmpty::single(payload),
