@@ -1,5 +1,7 @@
 #[cfg(feature = "dotos-text")]
-use dotos::{Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode, DotosSource};
+use dotos::{
+    Block, Delimiter, DotosBlock, DotosDecode, DotosDecodeError, DotosEncode, DotosSource,
+};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_frame::{
     AcceptedOutcome, BatchErrorClassification, BatchFailureReason, BoundExchangeFrame,
@@ -599,7 +601,8 @@ impl DotosEncode for DotosInbox {
 #[cfg(feature = "dotos-text")]
 impl DotosDecode for DotosInbox {
     fn from_dotos_block(block: &Block) -> Result<Self, DotosDecodeError> {
-        let children = DotosBlock::new(block).expect_children(Delimiter::Parenthesis, "Inbox", 2)?;
+        let children =
+            DotosBlock::new(block).expect_children(Delimiter::Parenthesis, "Inbox", 2)?;
         let head = children[0]
             .demote_to_string()
             .ok_or(DotosDecodeError::ExpectedAtom { type_name: "Inbox" })?;

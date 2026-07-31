@@ -31,7 +31,15 @@ mod working {
     use super::*;
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+        Archive,
+        RkyvSerialize,
+        RkyvDeserialize,
+        DotosEncode,
+        DotosDecode,
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
     )]
     pub struct Submission {
         body: String,
@@ -44,14 +52,30 @@ mod working {
     }
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+        Archive,
+        RkyvSerialize,
+        RkyvDeserialize,
+        DotosEncode,
+        DotosDecode,
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
     )]
     pub struct Query {
         selection: String,
     }
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+        Archive,
+        RkyvSerialize,
+        RkyvDeserialize,
+        DotosEncode,
+        DotosDecode,
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
     )]
     pub struct Accepted {
         ok: bool,
@@ -78,12 +102,28 @@ mod meta {
     use super::*;
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+        Archive,
+        RkyvSerialize,
+        RkyvDeserialize,
+        DotosEncode,
+        DotosDecode,
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
     )]
     pub struct Drain {}
 
     #[derive(
-        Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+        Archive,
+        RkyvSerialize,
+        RkyvDeserialize,
+        DotosEncode,
+        DotosDecode,
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
     )]
     pub struct Drained {}
 
