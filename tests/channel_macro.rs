@@ -394,6 +394,166 @@ fn macro_frame_alias_round_trips_with_generated_payloads() {
     }
 }
 
+// These records model the shape that strict generated Interfaces expose:
+// allocated text nested beneath products and sequences, with the validation
+// and rancor bounds made explicit at the record boundary. The channel roots
+// must propagate those generic bounds rather than assuming universally
+// checkable leaf payloads.
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+pub struct StrictReference {
+    digest: String,
+}
+
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+#[rkyv(serialize_bounds(
+    __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+    __S::Error: rkyv::rancor::Source,
+))]
+#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
+pub struct StrictResolutionRequest {
+    references: Vec<StrictReference>,
+    model_path: Vec<String>,
+}
+
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+#[rkyv(serialize_bounds(
+    __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+    __S::Error: rkyv::rancor::Source,
+))]
+#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
+pub struct StrictResolution {
+    accepted: Vec<StrictReference>,
+}
+
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+#[rkyv(serialize_bounds(
+    __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+    __S::Error: rkyv::rancor::Source,
+))]
+#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
+pub struct StrictResolutionUpdate {
+    observed: Vec<StrictReference>,
+    explanation: String,
+}
+
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+pub struct StrictLifecycleToken {
+    value: u64,
+}
+
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+pub struct StrictLifecycleOpened {
+    token: StrictLifecycleToken,
+}
+
+#[derive(
+    Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
+)]
+pub struct StrictLifecycleClosed {
+    token: StrictLifecycleToken,
+}
+
+mod strict_nested {
+    use super::*;
+
+    signal_channel! {
+        channel StrictNested contract TestContract {
+            operation Resolve(StrictResolutionRequest) opens ResolutionLifecycle,
+            operation Close(StrictLifecycleToken),
+        }
+        reply Reply {
+            Resolved(StrictResolution),
+            Opened(StrictLifecycleOpened),
+            Closed(StrictLifecycleClosed),
+        }
+        event Event {
+            Updated(StrictResolutionUpdate) belongs ResolutionLifecycle,
+        }
+        stream ResolutionLifecycle {
+            token StrictLifecycleToken;
+            opened Opened;
+            event Updated;
+            close Close;
+        }
+    }
+}
+
+fn strict_reference(digest: &str) -> StrictReference {
+    StrictReference {
+        digest: digest.to_owned(),
+    }
+}
+
+#[test]
+fn macro_round_trips_nested_strict_request_reply_and_event_roots() {
+    let exchange = fresh_exchange();
+    let operation = strict_nested::Operation::Resolve(StrictResolutionRequest {
+        references: vec![strict_reference("workflow"), strict_reference("operation")],
+        model_path: vec!["provider".to_owned(), "model".to_owned()],
+    });
+    let request = operation.into_request();
+    let route = request.route().expect("one operation has one route");
+    assert_eq!(route, WireRoute::new(RootCode::new(0), VariantCode::new(0)));
+    let request_text = request.to_dotos();
+    let decoded_text = DotosSource::new(&request_text)
+        .parse::<signal_frame::Request<strict_nested::Operation>>()
+        .expect("decode nested strict request Dotos");
+    assert_eq!(decoded_text, request);
+
+    let frame = strict_nested::Frame::new(
+        route,
+        StreamingFrameBody::Request {
+            exchange,
+            request: request.clone(),
+        },
+    );
+    let bytes = frame
+        .encode_length_prefixed()
+        .expect("encode nested strict request frame");
+    let decoded = strict_nested::Frame::decode_length_prefixed(&bytes)
+        .expect("decode nested strict request frame");
+    assert_eq!(decoded.short_header().route(), route);
+    assert_eq!(decoded.into_body(), frame.into_body());
+
+    let reply = strict_nested::Reply::Resolved(StrictResolution {
+        accepted: vec![strict_reference("workflow")],
+    });
+    let reply_text = reply.to_dotos();
+    assert_eq!(
+        DotosSource::new(&reply_text)
+            .parse::<strict_nested::Reply>()
+            .expect("decode nested strict reply Dotos"),
+        reply,
+    );
+
+    let event = strict_nested::Event::Updated(StrictResolutionUpdate {
+        observed: vec![strict_reference("workflow"), strict_reference("operation")],
+        explanation: "authority accepted the resolution".to_owned(),
+    });
+    let event_text = event.to_dotos();
+    assert_eq!(
+        DotosSource::new(&event_text)
+            .parse::<strict_nested::Event>()
+            .expect("decode nested strict event Dotos"),
+        event,
+    );
+}
+
 #[derive(
     Archive, RkyvSerialize, RkyvDeserialize, DotosEncode, DotosDecode, Debug, Clone, PartialEq, Eq,
 )]

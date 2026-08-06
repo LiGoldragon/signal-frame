@@ -260,6 +260,12 @@ fn emit_request_enum(block: &RequestBlockSpec) -> TokenStream {
             PartialEq,
             Eq,
         )]
+        #[rkyv(serialize_bounds(
+            __S: ::rkyv::ser::Writer + ::rkyv::ser::Allocator,
+            __S::Error: ::rkyv::rancor::Source,
+        ))]
+        #[rkyv(deserialize_bounds(__D::Error: ::rkyv::rancor::Source))]
+        #[rkyv(bytecheck(bounds(__C: ::rkyv::validation::ArchiveContext)))]
         pub enum #name {
             #( #variants, )*
         }
@@ -296,6 +302,12 @@ fn emit_reply_enum(block: &ReplyBlockSpec) -> TokenStream {
             PartialEq,
             Eq,
         )]
+        #[rkyv(serialize_bounds(
+            __S: ::rkyv::ser::Writer + ::rkyv::ser::Allocator,
+            __S::Error: ::rkyv::rancor::Source,
+        ))]
+        #[rkyv(deserialize_bounds(__D::Error: ::rkyv::rancor::Source))]
+        #[rkyv(bytecheck(bounds(__C: ::rkyv::validation::ArchiveContext)))]
         pub enum #name {
             #( #variants, )*
         }
@@ -321,6 +333,12 @@ fn emit_event_enum(block: &EventBlockSpec) -> TokenStream {
             PartialEq,
             Eq,
         )]
+        #[rkyv(serialize_bounds(
+            __S: ::rkyv::ser::Writer + ::rkyv::ser::Allocator,
+            __S::Error: ::rkyv::rancor::Source,
+        ))]
+        #[rkyv(deserialize_bounds(__D::Error: ::rkyv::rancor::Source))]
+        #[rkyv(bytecheck(bounds(__C: ::rkyv::validation::ArchiveContext)))]
         pub enum #name {
             #( #variants, )*
         }
