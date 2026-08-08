@@ -45,8 +45,8 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "dotos"
-version = "0.10.0"
-source = "git+https://github.com/LiGoldragon/dotos.git?rev=80c7b17f7ad3cf547d2624c6a243e5de5f85c9f3#80c7b17f7ad3cf547d2624c6a243e5de5f85c9f3"
+version = "0.10.1"
+source = "git+https://github.com/LiGoldragon/dotos.git?rev=b3c2c76fe7a18ba026ab054d1fa7162e55860b9e#b3c2c76fe7a18ba026ab054d1fa7162e55860b9e"
 dependencies = [
  "dotos-derive",
  "rkyv",
@@ -55,7 +55,7 @@ dependencies = [
 [[package]]
 name = "dotos-derive"
 version = "0.5.0"
-source = "git+https://github.com/LiGoldragon/dotos.git?rev=80c7b17f7ad3cf547d2624c6a243e5de5f85c9f3#80c7b17f7ad3cf547d2624c6a243e5de5f85c9f3"
+source = "git+https://github.com/LiGoldragon/dotos.git?rev=b3c2c76fe7a18ba026ab054d1fa7162e55860b9e#b3c2c76fe7a18ba026ab054d1fa7162e55860b9e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "signal-frame"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "dotos",
  "paste",
