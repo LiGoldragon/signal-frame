@@ -10,3 +10,9 @@ adapters, and CLI parsing out of this crate. The six Sema verbs
 do **not** live here — they live in the sibling crate `signal-sema`.
 
 This repository is under fast development and constantly breaking.
+
+## Protos estate status
+
+Stack: correct-new destination
+Status: active component contract, current checkout legacy-wired
+This checkout is not proof of correct-new adoption.
