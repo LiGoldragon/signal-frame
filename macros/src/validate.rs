@@ -10,7 +10,6 @@ use crate::model::ChannelSpec;
 pub(crate) fn validate(spec: &ChannelSpec) -> syn::Result<()> {
     validate_observable_does_not_collide(spec)?;
     validate_variant_uniqueness(spec)?;
-    validate_record_head_uniqueness(spec)?;
     validate_stream_relations(spec)?;
     Ok(())
 }
@@ -156,58 +155,6 @@ fn validate_variant_uniqueness(spec: &ChannelSpec) -> syn::Result<()> {
                 ));
             }
         }
-    }
-    Ok(())
-}
-
-fn validate_record_head_uniqueness(spec: &ChannelSpec) -> syn::Result<()> {
-    // The DOTOS decoder dispatches by record head, not by Rust type
-    // path. `domain_a::Status` and `domain_b::Status` both project to
-    // `(Status ...)`, so they collide inside the same payload enum.
-    flag_duplicate_record_heads(
-        spec.request
-            .variants
-            .iter()
-            .map(|v| (&v.variant_name, &v.payload_type)),
-        "request",
-    )?;
-    flag_duplicate_record_heads(
-        spec.reply.variants.iter().filter_map(|v| {
-            v.payload_type
-                .as_ref()
-                .map(|payload| (&v.variant_name, payload))
-        }),
-        "reply",
-    )?;
-    if let Some(event) = &spec.event {
-        flag_duplicate_record_heads(
-            event
-                .variants
-                .iter()
-                .map(|v| (&v.variant_name, &v.payload_type)),
-            "event",
-        )?;
-    }
-    Ok(())
-}
-
-fn flag_duplicate_record_heads<'spec>(
-    variants: impl Iterator<Item = (&'spec syn::Ident, &'spec Type)>,
-    block_kind: &'static str,
-) -> syn::Result<()> {
-    let mut seen: Vec<(String, &syn::Ident)> = Vec::new();
-    for (name, payload) in variants {
-        let head = projected_record_head(payload);
-        if let Some((_, prior)) = seen.iter().find(|(text, _)| *text == head) {
-            return Err(Error::new_spanned(
-                name,
-                format!(
-                    "duplicate DOTOS record head `{head}` in {block_kind} block — also used by variant `{}`",
-                    prior,
-                ),
-            ));
-        }
-        seen.push((head, name));
     }
     Ok(())
 }

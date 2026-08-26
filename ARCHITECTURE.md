@@ -134,9 +134,8 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   `Frame`, `FrameBody`, `Request`, `ReplyEnvelope`,
   `RequestBuilder`, `OperationKind`, `ReplyKind`, `EventKind`);
   crates with multiple channels use Rust modules for disambiguation.
-  The macro also emits the structurally obvious `From<Payload> for
-  Reply` impls so contract crates do not hand-write conversion
-  stacks.
+  Reply variants are constructed explicitly: payload types may be shared by
+  several reply variants, so no implicit `From<Payload>` conversion exists.
 - Under the `dotos-text` feature: `SingleArgument`,
   `SignalOperationHeads`, `CommandLineRouteTable`,
   `CommandLineSockets`, `CommandLineDispatch`, `ClientShape`, and

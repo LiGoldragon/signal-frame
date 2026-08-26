@@ -281,17 +281,6 @@ fn emit_reply_enum(block: &ReplyBlockSpec) -> TokenStream {
             None => quote! { #variant_name },
         }
     });
-    let from_impls = block.variants.iter().filter_map(|v| {
-        let variant_name = &v.variant_name;
-        let payload = v.payload_type.as_ref()?;
-        Some(quote! {
-            impl From<#payload> for #name {
-                fn from(payload: #payload) -> Self {
-                    Self::#variant_name(payload)
-                }
-            }
-        })
-    });
     quote! {
         #[derive(
             ::rkyv::Archive,
@@ -311,8 +300,6 @@ fn emit_reply_enum(block: &ReplyBlockSpec) -> TokenStream {
         pub enum #name {
             #( #variants, )*
         }
-
-        #( #from_impls )*
     }
 }
 
