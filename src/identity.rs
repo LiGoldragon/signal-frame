@@ -4,7 +4,7 @@
 //! receiver's typed state. `Revision` is the per-row revision counter
 //! used by pre-condition checks. Both are wire records here;
 //! allocation, lookup, revision bumping, and persistence belong to the
-//! Sema engine.
+//! Memory engine.
 
 use std::marker::PhantomData;
 

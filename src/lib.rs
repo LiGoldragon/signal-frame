@@ -7,8 +7,8 @@
 //! operation roots live in the per-component contract crates that
 //! depend on this one.
 //!
-//! The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
-//! `Subscribe`, `Validate`) live in the sibling crate `signal-sema`,
+//! The six Memory verbs (`Assert`, `Mutate`, `Retract`, `Match`,
+//! `Subscribe`, `Validate`) live in the sibling crate `signal-memory`,
 //! not here.
 //!
 //! The `signal_channel!` macro lives in the sibling

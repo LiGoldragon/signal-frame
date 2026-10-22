@@ -4,8 +4,8 @@ Work here only on shared Signal wire-kernel records and frame mechanics.
 
 - Keep this crate domain-free. Domain records live in per-component
   contract crates (`signal-<component>`).
-- Keep this crate verb-free. The six Sema verbs (`Assert`, `Mutate`,
-  `Retract`, `Match`, `Subscribe`, `Validate`) live in `signal-sema`,
+- Keep this crate verb-free. The six Memory verbs (`Assert`, `Mutate`,
+  `Retract`, `Match`, `Subscribe`, `Validate`) live in `signal-memory`,
   not here. `Request<Payload>` carries payloads directly — each payload
   is itself a contract operation whose DOTOS record head names the
   contract-local verb. There is no per-operation kernel wrapper.

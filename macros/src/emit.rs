@@ -1106,7 +1106,7 @@ fn emit_observable_runtime(
         /// In-memory state of all live observer subscriptions on this
         /// channel. The executor calls `publish_operation_received`
         /// after every inbound contract operation and
-        /// `publish_effect_emitted` after every committed Sema effect;
+        /// `publish_effect_emitted` after every committed Memory effect;
         /// observer subscription / unsubscription runs through
         /// `register` / `unregister`.
         pub struct #observer_set_name {

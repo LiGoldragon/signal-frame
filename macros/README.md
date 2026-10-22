@@ -13,7 +13,7 @@ aliases, so callers cannot select a contract or revision per frame.
 
 The macro's input grammar declares contract-local operation roots
 directly. The operation root is the caller's domain action; no
-universal Sema verb appears at this layer.
+universal Memory verb appears at this layer.
 
 ```rust
 signal_channel! {

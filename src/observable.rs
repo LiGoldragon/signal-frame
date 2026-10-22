@@ -16,7 +16,7 @@
 //!    trait in signal-frame is reachable from the bridge in
 //!    signal-executor.
 //!
-//! Neither trait mentions Sema-layer types. `ObservationProjection`'s
+//! Neither trait mentions Memory-layer types. `ObservationProjection`'s
 //! `Effect` associated type is the execution-fact type, generic at the
 //! trait level. A downstream executor bridge constrains it to that
 //! executor's own effect type at the impl site. This keeps the
@@ -85,7 +85,7 @@ pub trait ObservableSet {
 /// `Operation` is the contract's operation enum (e.g.
 /// `LedgerOperation`); `Effect` is the executor's execution-fact
 /// type (e.g. a component-local command effect), kept generic so this
-/// trait does not depend on signal-executor's Sema types. The
+/// trait does not depend on signal-executor's Memory types. The
 /// daemon's projection impl typically constrains the associated types
 /// via the macro-generated `<Channel>ObservationProjection` trait
 /// alias, which pins `Operation`, `OperationEvent`, and `EffectEvent`

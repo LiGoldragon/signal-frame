@@ -40,10 +40,10 @@ consume that trusted typed operation through its accessors; arbitrary decoded
 operations cannot call the handler directly.
 
 `signal-frame` is the renamed successor to the former `signal-core`
-crate. The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
+crate. The six Memory verbs (`Assert`, `Mutate`, `Retract`, `Match`,
 `Subscribe`, `Validate`) — which lived in `signal-core` — have moved
-to the sibling crate `signal-sema`, where they describe the
-internal Sema-engine execution vocabulary rather than public
+to the sibling crate `signal-memory`, where they describe the
+internal Memory-engine execution vocabulary rather than public
 wire-contract verbs.
 
 Schema-driven Rust generation lives in `schema-rust` build

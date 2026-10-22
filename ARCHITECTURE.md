@@ -11,9 +11,9 @@ every domain contract uses: frame mechanics, protocol-version
 records, exchange identifiers, and the request/reply/event shape.
 
 `signal-frame` is the renamed successor to the former `signal-core`.
-The six Sema verbs (`Assert` / `Mutate` / `Retract` / `Match` /
+The six Memory verbs (`Assert` / `Mutate` / `Retract` / `Match` /
 `Subscribe` / `Validate`) that used to live in this crate have moved
-to the sibling crate `signal-sema`.
+to the sibling crate `signal-memory`.
 
 ## 0 · TL;DR
 
@@ -25,17 +25,17 @@ roots in domain-verb form (`Query`, `Submit`, `Configure`,
 ```mermaid
 flowchart TB
     frame["signal-frame<br/>(frame kernel)"]
-    sema["signal-sema<br/>(Sema verbs)"]
+    memory["signal-memory<br/>(Memory verbs)"]
     components["signal-&lt;component&gt;<br/>(per-component contracts)"]
     meta["meta-signal-&lt;component&gt;<br/>(meta policy contracts)"]
 
-    frame --> sema
+    frame --> memory
     frame --> components
     frame --> meta
 ```
 
 Components depend on `signal-frame` for the wire kernel and on
-`signal-sema` when they need typed Sema operations internally (for
+`signal-memory` when they need typed Memory operations internally (for
 executor lowering, logging, introspection).
 
 ## 0.5 · Direction
@@ -149,10 +149,10 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
 
 ## 2 · Does Not Own
 
-- The six Sema verbs (`Assert`, `Mutate`, `Retract`, `Match`,
-  `Subscribe`, `Validate`). Those live in `signal-sema`.
+- The six Memory verbs (`Assert`, `Mutate`, `Retract`, `Match`,
+  `Subscribe`, `Validate`). Those live in `signal-memory`.
 - `PatternField<T>` and the read-algebra primitives (`Bind`,
-  `Wildcard`). Those live in `signal-sema` alongside the verbs they
+  `Wildcard`). Those live in `signal-memory` alongside the verbs they
   pair with.
 - Domain records of any kind. Per-component contract crates own
   those.
@@ -164,7 +164,7 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   must use socket credentials and policy contracts for actual authority
   decisions.
 - Slot allocation, slot dereference, or revision bump behavior.
-  Those belong to the Sema engine.
+  Those belong to the Memory engine.
 - Nexus text parsing or rendering over DOTOS syntax beyond the codec
   impls already in this crate.
 
@@ -194,7 +194,7 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
   binary frame types are always emitted; macro-generated DOTOS derives
   and manual DOTOS impls are gated under the consuming crate's
   `dotos-text` feature.
-- `Slot<T>` and `Revision` are wire identity records only. The Sema
+- `Slot<T>` and `Revision` are wire identity records only. The Memory
   engine owns allocation, lookup, compare-and-set, and persistence.
 - Text rendering/parsing of DOTOS records belongs to the DOTOS /
   Nexus projection layers. `signal-frame` exposes `dotos` only
@@ -206,7 +206,7 @@ Streaming push uses this crate as the low-level wire kernel only: `StreamingFram
 - Multi-payload request shape is structural — the
   `Request<Payload>`'s `NonEmpty<Payload>` sequence preserves
   order and aligns replies positionally. Database atomicity belongs
-  to `signal-sema` / `sema-engine` or to a contract that explicitly
+  to `signal-memory` / `memory-engine` or to a contract that explicitly
   promises it.
 - rkyv is the Rust-to-Rust wire. Nexus text in DOTOS syntax is a
   human projection outside this crate.
@@ -404,9 +404,9 @@ This crate was extracted from the former `signal-core` on
 redirection. The split:
 
 - `signal-core/src/verb.rs` — the six `SignalVerb` roots — moved
-  to `signal-sema`.
+  to `signal-memory`.
 - `signal-core/src/pattern.rs` — `Bind` / `Wildcard` /
-  `PatternField<T>` — moved to `signal-sema`.
+  `PatternField<T>` — moved to `signal-memory`.
 - `Operation::verb` and `RequestPayload::signal_verb()` — removed.
   Each payload is itself a contract operation now; the payload's
   DOTOS record head names the contract-local verb. The transparent
@@ -497,7 +497,7 @@ write source-visible generated modules.
 The sibling `macros/` proc-macro crate remains for the current
 hand-written `signal_channel!` contract declarations. That macro is a
 bridge for contracts that have not yet moved to schema-derived
-generation; it does not own daemon runtime, SEMA storage, Nexus
+generation; it does not own daemon runtime, MEMORY storage, Nexus
 decisions, or the schema compiler.
 
 ## See Also

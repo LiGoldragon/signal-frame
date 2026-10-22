@@ -5,9 +5,9 @@ editing.
 
 `signal-frame` is the frame-mechanics contract repo, renamed from the
 former `signal-core`. Keep runtime actors, reducers, stores, terminal
-adapters, and CLI parsing out of this crate. The six Sema verbs
+adapters, and CLI parsing out of this crate. The six Memory verbs
 (`Assert` / `Mutate` / `Retract` / `Match` / `Subscribe` / `Validate`)
-do **not** live here — they live in the sibling crate `signal-sema`.
+do **not** live here — they live in the sibling crate `signal-memory`.
 
 This repository is under fast development and constantly breaking.
 
