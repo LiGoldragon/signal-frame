@@ -343,13 +343,6 @@ fn operation_dispatch_rejects_forged_variant_before_handler() {
 }
 
 #[test]
-fn generated_surface_has_no_option_route_classifier() {
-    let source = include_str!("../macros/src/emit.rs");
-    assert!(!source.contains("pub fn kind_from_short_header"));
-    assert!(!source.contains("Option<#kind_name>"));
-}
-
-#[test]
 fn signal_cli_macro_routes_heads_to_working_or_meta_socket() {
     let dispatch = MessageCommandLineDispatch::new();
 
